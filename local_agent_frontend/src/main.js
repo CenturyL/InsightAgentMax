@@ -1,7 +1,16 @@
 import "./style.css";
 import { marked } from "marked";
 
-const defaultThreadId = crypto.randomUUID();
+function createThreadId() {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+
+  const random = Math.random().toString(36).slice(2, 10);
+  return `thread-${Date.now()}-${random}`;
+}
+
+const defaultThreadId = createThreadId();
 
 const state = {
   apiBase: localStorage.getItem("agent-api-base") || "/api/v1",
@@ -586,7 +595,7 @@ threadInput.addEventListener("change", () => {
 });
 
 $("#regenThread").addEventListener("click", () => {
-  state.threadId = crypto.randomUUID();
+  state.threadId = createThreadId();
   threadInput.value = state.threadId;
   localStorage.setItem("agent-thread-id", state.threadId);
 });
