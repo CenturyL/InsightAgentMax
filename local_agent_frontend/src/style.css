@@ -150,6 +150,10 @@ h5 {
   padding: 24px;
 }
 
+.hidden {
+  display: none !important;
+}
+
 .hero-metrics,
 .mini-metrics,
 .metric-grid,
@@ -547,6 +551,7 @@ textarea {
   margin: 0;
   padding: 18px;
   min-height: 180px;
+  max-height: 360px;
   border-radius: 20px;
   background: var(--ink);
   color: #f4ead9;
@@ -561,10 +566,12 @@ textarea {
 
 .stream-box {
   min-height: 210px;
+  max-height: 320px;
 }
 
 .result-box.large {
-  min-height: 320px;
+  min-height: 220px;
+  max-height: 320px;
 }
 
 .dashboard-grid {
