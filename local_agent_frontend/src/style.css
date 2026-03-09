@@ -671,13 +671,14 @@ ul {
 .check {
   display: flex;
   gap: 10px;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-start;
 }
 
 .check span {
   writing-mode: horizontal-tb;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.5;
 }
 
 button {
