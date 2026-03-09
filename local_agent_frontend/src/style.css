@@ -368,6 +368,8 @@ textarea {
 
 .composer-actions {
   display: flex;
+  gap: 12px;
+  align-items: center;
   justify-content: flex-end;
 }
 
@@ -668,6 +670,22 @@ ul {
   writing-mode: horizontal-tb;
   white-space: normal;
   line-height: 1.5;
+}
+
+.compact-check {
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(71, 52, 32, 0.1);
+  background: rgba(255, 250, 243, 0.82);
+}
+
+.compact-check span {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.testing-shortcut {
+  white-space: nowrap;
 }
 
 button {

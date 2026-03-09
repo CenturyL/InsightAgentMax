@@ -151,6 +151,10 @@ app.innerHTML = `
             </label>
             <div class="live-status" id="agentStatus">等待发送请求...</div>
             <div class="composer-actions">
+              <label class="check compact-check">
+                <input id="forceComplex" type="checkbox" />
+                <span>强制复杂模式</span>
+              </label>
               <button id="sendChat">发送</button>
             </div>
           </section>
@@ -163,6 +167,9 @@ app.innerHTML = `
             <p class="eyebrow">Evaluation</p>
             <h3>评估与 Benchmark</h3>
           </div>
+          <div class="inline compact">
+            <button id="showTestingPanel" class="ghost testing-shortcut">测试环境重建</button>
+          </div>
         </div>
 
         <div class="inline wrap">
@@ -170,7 +177,6 @@ app.innerHTML = `
           <button id="runCompare" class="ghost">Baseline Compare</button>
           <button id="runGenerationEval" class="ghost">Generation Eval</button>
           <button id="runBenchmark" class="ghost">System Benchmark</button>
-          <button id="showTestingPanel" class="ghost">测试环境重建</button>
         </div>
 
         <div id="evalStatus" class="live-status eval-status">选择一个评估功能后开始运行。</div>
@@ -660,7 +666,7 @@ async function submitChat() {
         query,
         thread_id: state.threadId,
         user_id: $("#userId").value.trim(),
-        task_mode: null,
+        task_mode: $("#forceComplex").checked ? "compare" : null,
         metadata_filters: metadataFilters,
       }),
     });
