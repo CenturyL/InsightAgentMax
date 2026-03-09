@@ -672,16 +672,29 @@ ul {
   line-height: 1.5;
 }
 
-.compact-check {
-  padding: 10px 14px;
-  border-radius: 14px;
-  border: 1px solid rgba(71, 52, 32, 0.1);
-  background: rgba(255, 250, 243, 0.82);
+.toggle-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50px;
+  padding: 0 18px;
+  border-radius: 16px;
+  cursor: pointer;
+  user-select: none;
+  transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease, color 160ms ease;
 }
 
-.compact-check span {
+.toggle-chip input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toggle-chip span {
   font-size: 14px;
-  color: var(--text);
+  line-height: 1;
+  color: inherit;
+  white-space: nowrap;
 }
 
 .testing-shortcut {

@@ -151,7 +151,7 @@ app.innerHTML = `
             </label>
             <div class="live-status" id="agentStatus">等待发送请求...</div>
             <div class="composer-actions">
-              <label class="check compact-check">
+              <label id="forceComplexToggle" class="ghost toggle-chip">
                 <input id="forceComplex" type="checkbox" />
                 <span>强制复杂模式</span>
               </label>
@@ -260,6 +260,11 @@ const $ = (selector) => document.querySelector(selector);
 
 const apiBaseInput = $("#apiBase");
 const threadInput = $("#threadId");
+const forceComplexInput = $("#forceComplex");
+
+function syncForceComplexToggle() {
+  $("#forceComplexToggle")?.classList.toggle("is-active", forceComplexInput.checked);
+}
 
 function setRailOpen(open) {
   state.railOpen = open;
@@ -633,6 +638,8 @@ $("#regenThread").addEventListener("click", () => {
   localStorage.setItem("agent-thread-id", state.threadId);
 });
 
+forceComplexInput.addEventListener("change", syncForceComplexToggle);
+
 $("#clearChat").addEventListener("click", () => {
   state.messages = [];
   state.activeTrace = [];
@@ -872,3 +879,4 @@ renderMessages();
 syncDashboard();
 setRailOpen(false);
 setActiveEvalAction(null);
+syncForceComplexToggle();
