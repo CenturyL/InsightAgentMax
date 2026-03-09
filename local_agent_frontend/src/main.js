@@ -22,9 +22,9 @@ const state = {
   activeTrace: [],
   statusTimer: null,
   requestStartedAt: null,
-  activeQuestion: "",
   railOpen: false,
-  activeEvalAction: "",
+  activeEvalAction: "runRetrievalEval",
+  streamingAnswer: "",
 };
 
 marked.setOptions({
@@ -73,35 +73,7 @@ app.innerHTML = `
           <span>Retrieval</span>
           <strong>Hybrid + Rerank</strong>
         </div>
-        <div class="mini-card">
-          <span>Ops</span>
-          <strong>Eval + Benchmark</strong>
-        </div>
       </div>
-
-      <section class="panel compact-panel">
-        <div class="panel-head tight">
-          <div>
-            <p class="eyebrow">Testing</p>
-            <h3>测试环境重建</h3>
-          </div>
-        </div>
-        <p class="helper-text">
-          用于一键重新下载测试语料、清洗、入库并重建评估集，适合在新环境或测试数据被改乱后快速恢复。
-        </p>
-        <div class="compact-actions">
-          <label class="check">
-            <input id="forceDownload" type="checkbox" />
-            <span>强制下载：忽略本地缓存，重新抓取测试文档</span>
-          </label>
-          <label class="check">
-            <input id="runRetrievalEvalAfterRebuild" type="checkbox" checked />
-            <span>自动评估：重建完成后顺手跑一次 retrieval eval</span>
-          </label>
-        </div>
-        <button id="rebuildEnv">重建环境</button>
-        <pre id="rebuildResult" class="result-box compact-result"></pre>
-      </section>
 
       <section class="panel compact-panel">
         <div class="panel-head tight">
@@ -128,7 +100,6 @@ app.innerHTML = `
           <h2>InsightAgent</h2>
           <p class="hero-text">面向政策通知、招投标公告与本地知识资料分析的多模式 Agent 工作台。</p>
         </div>
-        <div class="hero-metrics" id="summaryCards"></div>
       </header>
 
       <section class="panel chat-panel">
@@ -138,38 +109,20 @@ app.innerHTML = `
             <h3>对话工作区</h3>
           </div>
           <div class="inline compact">
-            <label class="field slim">
-              <span>Task Mode</span>
-              <select id="taskMode">
-                <option value="">auto</option>
-                <option value="qa">qa</option>
-                <option value="compare">compare</option>
-                <option value="extract">extract</option>
-                <option value="report">report</option>
-              </select>
-            </label>
             <button id="clearChat" class="ghost">清空会话</button>
           </div>
         </div>
 
-        <div class="workbench-grid">
-          <section class="response-card primary-card message-column">
-            <div class="message-head">
+        <div class="chat-stack">
+          <section class="response-card chat-history-card">
+            <div class="response-head">
               <p class="eyebrow">Conversation</p>
-              <strong>聊天记录</strong>
+              <strong>当前回答与历史记录</strong>
             </div>
             <div id="messageList" class="message-list"></div>
           </section>
 
-          <section class="response-card primary-card">
-            <div class="response-head">
-              <p class="eyebrow">Answer</p>
-              <strong>当前回答</strong>
-            </div>
-            <div id="answerPreview" class="answer-preview markdown-body">等待发送请求...</div>
-          </section>
-
-          <section class="response-card secondary-card">
+          <section class="response-card trace-card">
             <div class="response-head">
               <p class="eyebrow">Trace</p>
               <strong>执行过程</strong>
@@ -179,7 +132,7 @@ app.innerHTML = `
             </div>
           </section>
 
-          <section class="response-card secondary-card composer-card">
+          <section class="response-card composer-card">
             <div class="response-head">
               <p class="eyebrow">Prompt</p>
               <strong>提问</strong>
@@ -229,41 +182,81 @@ app.innerHTML = `
           <button id="runCompare" class="ghost">Baseline Compare</button>
           <button id="runGenerationEval" class="ghost">Generation Eval</button>
           <button id="runBenchmark" class="ghost">System Benchmark</button>
+          <button id="showTestingPanel" class="ghost">测试环境重建</button>
         </div>
 
-        <div class="dashboard-grid">
-          <section class="dashboard-card">
-            <div class="chart-head">
-              <div>
-                <p class="eyebrow">Metrics</p>
-                <h4>关键指标卡片</h4>
-              </div>
-            </div>
-            <div id="metricCards" class="metric-grid"></div>
-          </section>
+        <div id="evalStatus" class="live-status eval-status">选择一个评估功能后开始运行。</div>
 
-          <section class="dashboard-card">
-            <div class="chart-head">
-              <div>
-                <p class="eyebrow">Compare</p>
-                <h4>Baseline 柱状图</h4>
-              </div>
+        <section id="retrievalEvalPanel" class="dashboard-card eval-panel">
+          <div class="chart-head">
+            <div>
+              <p class="eyebrow">Metrics</p>
+              <h4>Retrieval Eval</h4>
             </div>
-            <div id="compareChart" class="chart-panel empty-state">运行 Baseline Compare 后显示</div>
-          </section>
+          </div>
+          <div id="retrievalHighlights" class="hero-metrics hero-metrics-2"></div>
+          <div id="metricCards" class="metric-grid"></div>
+          <pre id="retrievalEvalResult" class="result-box large"></pre>
+        </section>
 
-          <section class="dashboard-card span-2">
-            <div class="chart-head">
-              <div>
-                <p class="eyebrow">Latency</p>
-                <h4>Benchmark 图表</h4>
-              </div>
+        <section id="comparePanel" class="dashboard-card eval-panel hidden">
+          <div class="chart-head">
+            <div>
+              <p class="eyebrow">Compare</p>
+              <h4>Baseline Compare</h4>
             </div>
-            <div id="benchmarkChart" class="chart-panel empty-state">运行 System Benchmark 后显示</div>
-          </section>
-        </div>
+          </div>
+          <div id="compareChart" class="chart-panel empty-state">运行 Baseline Compare 后显示</div>
+          <pre id="compareResult" class="result-box large"></pre>
+        </section>
 
-        <pre id="evalResult" class="result-box large"></pre>
+        <section id="generationEvalPanel" class="dashboard-card eval-panel hidden">
+          <div class="chart-head">
+            <div>
+              <p class="eyebrow">Generation</p>
+              <h4>Generation Eval</h4>
+            </div>
+          </div>
+          <pre id="generationEvalResult" class="result-box large"></pre>
+        </section>
+
+        <section id="benchmarkPanel" class="dashboard-card eval-panel hidden">
+          <div class="chart-head">
+            <div>
+              <p class="eyebrow">Benchmark</p>
+              <h4>System Benchmark</h4>
+            </div>
+          </div>
+          <div id="benchmarkHighlights" class="hero-metrics hero-metrics-1"></div>
+          <div id="benchmarkChart" class="chart-panel empty-state">运行 System Benchmark 后显示</div>
+          <pre id="benchmarkResult" class="result-box large"></pre>
+        </section>
+
+        <section id="testingPanel" class="dashboard-card eval-panel hidden">
+          <div class="chart-head">
+            <div>
+              <p class="eyebrow">Testing</p>
+              <h4>测试环境重建</h4>
+            </div>
+          </div>
+          <p class="helper-text">
+            用于一键重新下载测试语料、清洗、入库并重建评估集，适合在新环境或测试数据被改乱后快速恢复。
+          </p>
+          <div class="compact-actions">
+            <label class="check">
+              <input id="forceDownload" type="checkbox" />
+              <span>强制下载：忽略本地缓存，重新抓取测试文档</span>
+            </label>
+            <label class="check">
+              <input id="runRetrievalEvalAfterRebuild" type="checkbox" checked />
+              <span>自动评估：重建完成后顺手跑一次 retrieval eval</span>
+            </label>
+          </div>
+          <div class="inline wrap">
+            <button id="rebuildEnv">重建环境</button>
+          </div>
+          <pre id="rebuildResult" class="result-box large"></pre>
+        </section>
       </section>
     </main>
   </div>
@@ -280,13 +273,25 @@ function setRailOpen(open) {
 }
 
 function setActiveEvalAction(buttonId) {
-  const ids = ["runRetrievalEval", "runCompare", "runGenerationEval", "runBenchmark"];
+  const ids = ["runRetrievalEval", "runCompare", "runGenerationEval", "runBenchmark", "showTestingPanel"];
   state.activeEvalAction = buttonId;
   ids.forEach((id) => {
     const button = $("#" + id);
     if (!button) return;
     button.classList.toggle("is-active", id === buttonId);
   });
+
+  const panelMap = {
+    runRetrievalEval: "retrievalEvalPanel",
+    runCompare: "comparePanel",
+    runGenerationEval: "generationEvalPanel",
+    runBenchmark: "benchmarkPanel",
+    showTestingPanel: "testingPanel",
+  };
+  Object.values(panelMap).forEach((panelId) => {
+    $("#" + panelId)?.classList.add("hidden");
+  });
+  $("#" + panelMap[buttonId])?.classList.remove("hidden");
 }
 
 function formatNumber(value, digits = 4) {
@@ -318,15 +323,26 @@ function addMessage(role, content) {
 
 function renderMessages() {
   const messageList = $("#messageList");
-  if (!state.messages.length) {
+  const messages = [...state.messages];
+
+  if (state.streamingAnswer) {
+    messages.push({
+      role: "agent",
+      content: state.streamingAnswer,
+      time: "生成中",
+      streaming: true,
+    });
+  }
+
+  if (!messages.length) {
     messageList.innerHTML = `<div class="empty-chat">发送一条消息后，聊天记录会显示在这里。</div>`;
     return;
   }
 
-  messageList.innerHTML = state.messages
+  messageList.innerHTML = messages
     .map(
       (message) => `
-        <article class="message-card ${message.role}">
+        <article class="message-card ${message.role} ${message.streaming ? "streaming" : ""}">
           <header>
             <strong>${message.role === "user" ? "User" : "Agent"}</strong>
             <span>${message.time}</span>
@@ -340,6 +356,7 @@ function renderMessages() {
       `
     )
     .join("");
+  messageList.scrollTop = messageList.scrollHeight;
 }
 
 function escapeHtml(value) {
@@ -394,25 +411,6 @@ function renderTrace(traceLines) {
     .join("");
 }
 
-function renderAnswerPreview(answer) {
-  const container = $("#answerPreview");
-  const questionBlock = state.activeQuestion
-    ? `<section class="answer-question"><span>本轮问题</span><strong>${escapeHtml(state.activeQuestion)}</strong></section>`
-    : "";
-
-  if (!answer) {
-    container.innerHTML = `
-      ${questionBlock}
-      <div class="empty-chat">正在等待模型生成正文...</div>
-    `;
-    return;
-  }
-  container.innerHTML = `
-    ${questionBlock}
-    <section class="answer-body">${marked.parse(answer)}</section>
-  `;
-}
-
 function stopStatusTicker() {
   if (state.statusTimer) {
     clearInterval(state.statusTimer);
@@ -438,11 +436,12 @@ function startStatusTicker() {
 }
 
 function renderSummaryCards() {
-  const summaryCards = $("#summaryCards");
+  const retrievalCards = $("#retrievalHighlights");
+  const benchmarkCards = $("#benchmarkHighlights");
   const retrieval = state.latestRetrievalMetrics;
   const benchmark = state.latestBenchmarkMetrics;
 
-  const cards = [
+  const retrievalHighlights = [
     {
       label: "最近 Recall@K",
       value: retrieval ? formatNumber(retrieval.avg_recall_at_k, 4) : "待运行",
@@ -453,6 +452,9 @@ function renderSummaryCards() {
       value: retrieval ? formatNumber(retrieval.mrr, 4) : "待运行",
       tone: "teal",
     },
+  ];
+
+  const benchmarkHighlights = [
     {
       label: "复杂任务时延",
       value: benchmark ? `${formatNumber(benchmark.complex_request_latency_ms, 2)} ms` : "待运行",
@@ -460,7 +462,18 @@ function renderSummaryCards() {
     },
   ];
 
-  summaryCards.innerHTML = cards
+  retrievalCards.innerHTML = retrievalHighlights
+    .map(
+      (card) => `
+        <div class="metric metric-${card.tone}">
+          <span>${card.label}</span>
+          <strong>${card.value}</strong>
+        </div>
+      `
+    )
+    .join("");
+
+  benchmarkCards.innerHTML = benchmarkHighlights
     .map(
       (card) => `
         <div class="metric metric-${card.tone}">
@@ -586,8 +599,9 @@ async function readStream(response, target) {
     target.scrollTop = target.scrollHeight;
     const parsed = splitStreamContent(buffer);
     state.activeTrace = parsed.trace;
+    state.streamingAnswer = parsed.answer;
     renderTrace(parsed.trace);
-    renderAnswerPreview(parsed.answer);
+    renderMessages();
   }
   return buffer;
 }
@@ -626,8 +640,8 @@ $("#regenThread").addEventListener("click", () => {
 
 $("#clearChat").addEventListener("click", () => {
   state.messages = [];
-  state.activeQuestion = "";
-  $("#answerPreview").innerHTML = `<div class="empty-chat">会话已清空。</div>`;
+  state.activeTrace = [];
+  state.streamingAnswer = "";
   $("#traceList").innerHTML = `<div class="empty-chat">会话已清空。</div>`;
   $("#agentStatus").textContent = "会话已清空。";
   renderMessages();
@@ -641,10 +655,9 @@ async function submitChat() {
     return;
   }
 
-  state.activeQuestion = query;
   state.activeTrace = [];
+  state.streamingAnswer = "";
   renderTrace([]);
-  renderAnswerPreview("");
   startStatusTicker();
   addMessage("user", query);
   queryInput.value = "";
@@ -658,7 +671,7 @@ async function submitChat() {
         query,
         thread_id: state.threadId,
         user_id: $("#userId").value.trim(),
-        task_mode: $("#taskMode").value || null,
+        task_mode: null,
         metadata_filters: metadataFilters,
       }),
     });
@@ -671,14 +684,14 @@ async function submitChat() {
     const finalText = await readStream(response, bufferTarget);
     const parsed = splitStreamContent(finalText);
     renderTrace(parsed.trace);
-    renderAnswerPreview(parsed.answer);
+    state.streamingAnswer = "";
     $("#agentStatus").textContent = "生成完成";
     addMessage("agent", parsed.answer || finalText || "空响应");
     stopStatusTicker();
   } catch (error) {
     stopStatusTicker();
+    state.streamingAnswer = "";
     $("#agentStatus").textContent = `请求失败：${error.message}`;
-    renderAnswerPreview(`请求失败：${error.message}`);
     addMessage("agent", `请求失败：${error.message}`);
   }
 }
@@ -718,6 +731,8 @@ $("#uploadKnowledge").addEventListener("click", async () => {
 
 $("#rebuildEnv").addEventListener("click", async () => {
   const resultBox = $("#rebuildResult");
+  setActiveEvalAction("showTestingPanel");
+  $("#evalStatus").textContent = "正在重建测试环境...";
   resultBox.textContent = "正在重建测试环境...";
 
   try {
@@ -733,14 +748,17 @@ $("#rebuildEnv").addEventListener("click", async () => {
       state.latestRetrievalMetrics = payload.result.retrieval_eval;
       syncDashboard();
     }
+    $("#evalStatus").textContent = "测试环境重建完成。";
   } catch (error) {
     resultBox.textContent = `重建失败：${error.message}`;
+    $("#evalStatus").textContent = `测试环境重建失败：${error.message}`;
   }
 });
 
 $("#runRetrievalEval").addEventListener("click", async () => {
-  const resultBox = $("#evalResult");
+  const resultBox = $("#retrievalEvalResult");
   setActiveEvalAction("runRetrievalEval");
+  $("#evalStatus").textContent = "正在运行 Retrieval Eval...";
   resultBox.textContent = "正在运行 retrieval eval...";
   try {
     const payload = await requestJson("/eval/retrieval", {
@@ -754,14 +772,17 @@ $("#runRetrievalEval").addEventListener("click", async () => {
     prettyPrint(resultBox, payload);
     state.latestRetrievalMetrics = payload.metrics;
     syncDashboard();
+    $("#evalStatus").textContent = "Retrieval Eval 运行完成。";
   } catch (error) {
     resultBox.textContent = `retrieval eval 失败：${error.message}`;
+    $("#evalStatus").textContent = `Retrieval Eval 失败：${error.message}`;
   }
 });
 
 $("#runCompare").addEventListener("click", async () => {
-  const resultBox = $("#evalResult");
+  const resultBox = $("#compareResult");
   setActiveEvalAction("runCompare");
+  $("#evalStatus").textContent = "正在运行 Baseline Compare...";
   resultBox.textContent = "正在运行 baseline compare...";
   try {
     const payload = await requestJson("/eval/retrieval/compare", {
@@ -780,14 +801,17 @@ $("#runCompare").addEventListener("click", async () => {
       state.latestRetrievalMetrics = best;
     }
     syncDashboard();
+    $("#evalStatus").textContent = "Baseline Compare 运行完成。";
   } catch (error) {
     resultBox.textContent = `compare 失败：${error.message}`;
+    $("#evalStatus").textContent = `Baseline Compare 失败：${error.message}`;
   }
 });
 
 $("#runGenerationEval").addEventListener("click", async () => {
-  const resultBox = $("#evalResult");
+  const resultBox = $("#generationEvalResult");
   setActiveEvalAction("runGenerationEval");
+  $("#evalStatus").textContent = "正在运行 Generation Eval...";
   resultBox.textContent = "正在运行 generation eval...";
   try {
     const payload = await requestJson("/eval/generation", {
@@ -797,14 +821,17 @@ $("#runGenerationEval").addEventListener("click", async () => {
       }),
     });
     prettyPrint(resultBox, payload);
+    $("#evalStatus").textContent = "Generation Eval 运行完成。";
   } catch (error) {
     resultBox.textContent = `generation eval 失败：${error.message}`;
+    $("#evalStatus").textContent = `Generation Eval 失败：${error.message}`;
   }
 });
 
 $("#runBenchmark").addEventListener("click", async () => {
-  const resultBox = $("#evalResult");
+  const resultBox = $("#benchmarkResult");
   setActiveEvalAction("runBenchmark");
+  $("#evalStatus").textContent = "正在运行 System Benchmark...";
   resultBox.textContent = "正在运行 system benchmark...";
   try {
     const payload = await requestJson("/eval/benchmark", {
@@ -816,11 +843,19 @@ $("#runBenchmark").addEventListener("click", async () => {
     prettyPrint(resultBox, payload);
     state.latestBenchmarkMetrics = payload.metrics;
     syncDashboard();
+    $("#evalStatus").textContent = "System Benchmark 运行完成。";
   } catch (error) {
     resultBox.textContent = `benchmark 失败：${error.message}`;
+    $("#evalStatus").textContent = `System Benchmark 失败：${error.message}`;
   }
+});
+
+$("#showTestingPanel").addEventListener("click", () => {
+  setActiveEvalAction("showTestingPanel");
+  $("#evalStatus").textContent = "当前显示测试环境重建模块。";
 });
 
 renderMessages();
 syncDashboard();
 setRailOpen(false);
+setActiveEvalAction("runRetrievalEval");
