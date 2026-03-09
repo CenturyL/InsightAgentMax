@@ -90,7 +90,8 @@ app.innerHTML = `
           </div>
         </div>
         <div class="stack">
-          <input id="knowledgeFile" type="file" />
+          <input id="knowledgeFile" type="file" accept=".txt,.md,.pdf,.html,.htm,.csv,.tsv,.png,.jpg,.jpeg,.webp" />
+          <p class="helper-text">支持上传：TXT、MD、PDF、HTML、CSV/TSV、PNG/JPG/JPEG/WEBP。图片会走 OCR 提取文本后入库。</p>
           <button id="uploadKnowledge">上传并入库</button>
           <pre id="uploadResult" class="result-box compact-result">等待上传文件，这里会显示入库结果、切块数量和来源信息。</pre>
         </div>
