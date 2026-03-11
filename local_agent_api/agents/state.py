@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Typed state definitions shared across the complex-task orchestration graph."""
+
 from typing import Any, Literal
 
 from langchain_core.documents import Document
@@ -8,6 +10,7 @@ from typing_extensions import NotRequired, TypedDict
 
 
 class PlanStep(TypedDict):
+    """One planner-produced unit of work for the executor to consume."""
     step_id: str
     goal: str
     reason: str
@@ -17,6 +20,7 @@ class PlanStep(TypedDict):
 
 
 class StepResult(TypedDict):
+    """Step-level execution output used by reflection and final synthesis."""
     step_id: str
     goal: str
     query: str
@@ -25,6 +29,7 @@ class StepResult(TypedDict):
 
 
 class OrchestratorState(TypedDict):
+    """Shared state passed between complex-task nodes in LangGraph."""
     messages: list[BaseMessage]
     user_id: str
     thread_id: str

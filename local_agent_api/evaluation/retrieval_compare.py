@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Compare multiple retrieval strategies against the same labeled dataset."""
+
 from pydantic import BaseModel
 
 from local_agent_api.evaluation.retrieval_eval import RetrievalEvalMetrics, run_retrieval_eval
@@ -15,6 +17,7 @@ BASELINE_STRATEGIES: list[SearchStrategy] = [
 
 
 class RetrievalCompareReport(BaseModel):
+    """Bundle all baseline reports plus lift/delta summaries for the frontend."""
     dataset_size: int
     top_k: int
     candidate_k: int
@@ -27,6 +30,7 @@ def run_retrieval_compare(
     top_k: int = 3,
     candidate_k: int = 15,
 ) -> RetrievalCompareReport:
+    """Run all baseline strategies so their metrics can be compared side by side."""
     reports = [
         run_retrieval_eval(
             dataset_path=dataset_path,

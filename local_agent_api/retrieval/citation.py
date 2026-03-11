@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+"""Helpers for converting retrieved documents into lightweight citation records."""
+
 from langchain_core.documents import Document
 
 
 def build_citations(docs: list[Document]) -> list[dict]:
+    """Normalize document metadata so downstream code can render consistent citations."""
     citations: list[dict] = []
     for idx, doc in enumerate(docs, start=1):
         metadata = doc.metadata or {}
@@ -23,6 +26,7 @@ def build_citations(docs: list[Document]) -> list[dict]:
 
 
 def format_citations(citations: list[dict]) -> str:
+    """Render citations into plain text for prompts and fallback answers."""
     if not citations:
         return "无"
 
@@ -39,4 +43,3 @@ def format_citations(citations: list[dict]) -> str:
         label = f"{source} ({', '.join(suffix)})" if suffix else str(source)
         lines.append(f"- {label}")
     return "\n".join(lines)
-

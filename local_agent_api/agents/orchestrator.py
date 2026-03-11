@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Wire planner / executor / reflection / synthesis into one complex-task graph."""
+
 from typing import Literal
 
 from langgraph.graph import END, START, StateGraph
@@ -44,10 +46,12 @@ SYNTHESIZER_PROMPT = """你是一个政策与招投标情报分析助手。请�
 
 
 def _route_after_complexity(state: OrchestratorState) -> Literal["react_agent", "planner"]:
+    """Choose the simple pass-through path or the complex planning path."""
     return "planner" if state.get("is_complex") else "react_agent"
 
 
 def _format_instruction_for_mode(task_mode: str | None) -> str:
+    """Provide answer-shape guidance so synthesis matches the requested task mode."""
     mode = task_mode or "qa"
     if mode == "compare":
         return "使用“结论 / 对比维度 / 差异摘要 / 建议”结构，尽量用表格表达核心差异。"
@@ -59,6 +63,7 @@ def _format_instruction_for_mode(task_mode: str | None) -> str:
 
 
 def build_synthesizer_prompt(state: OrchestratorState) -> str:
+    """Assemble the final prompt from plan, step evidence, and citations."""
     query = str(state["messages"][-1].content) if state.get("messages") else ""
     task_mode = state.get("task_mode", "qa")
     plan_lines = [
@@ -80,6 +85,7 @@ def build_synthesizer_prompt(state: OrchestratorState) -> str:
 
 
 async def synthesizer_node(state: OrchestratorState) -> OrchestratorState:
+    """Generate the final user-facing answer from intermediate execution state."""
     task_mode = state.get("task_mode", "qa")
     prompt = build_synthesizer_prompt(state)
     plan_lines = [
@@ -117,6 +123,7 @@ async def synthesizer_node(state: OrchestratorState) -> OrchestratorState:
 
 
 def build_orchestrator():
+    """Compile the LangGraph workflow used by complex requests."""
     graph = StateGraph(OrchestratorState)
     graph.add_node("complexity_router", complexity_router_node)
     graph.add_node("react_agent", react_passthrough_node)

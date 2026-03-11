@@ -1,8 +1,11 @@
+"""Pydantic request models shared by FastAPI routes."""
+
 from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 # 用Pydantic定义传入参数规范，FastAPI靠它来拦截所有非法请求
 class ChatRequest(BaseModel):
+    """Unified chat payload used by both direct chat and agent endpoints."""
     query: str = Field(..., description="用户的提问内容")
     temperature: float = Field(default=0.7, description="模型生成的温度值，越高越有创造性")
     # P1-7：会话 ID，传入相同 thread_id 可保持多轮对话记忆
@@ -16,6 +19,7 @@ class ChatRequest(BaseModel):
 
 
 class RetrievalEvalRequest(BaseModel):
+    """Input schema for retrieval eval and retrieval baseline comparison endpoints."""
     dataset_path: Optional[str] = Field(
         default=None,
         description="离线检索评估数据集路径，默认读取 local_agent_api/data/eval/retrieval_eval_dataset.jsonl",
@@ -26,6 +30,7 @@ class RetrievalEvalRequest(BaseModel):
 
 
 class GenerationEvalRequest(BaseModel):
+    """Input schema for generation-quality evaluation."""
     dataset_path: Optional[str] = Field(
         default=None,
         description="离线生成评估数据集路径，默认读取 local_agent_api/data/eval/generation_eval_dataset.jsonl",
@@ -34,11 +39,13 @@ class GenerationEvalRequest(BaseModel):
 
 
 class RebuildTestEnvRequest(BaseModel):
+    """Options for rebuilding the demo corpus and optional post-rebuild evaluation."""
     force_download: bool = Field(default=False, description="是否强制重新下载公开测试文档")
     run_retrieval_eval: bool = Field(default=True, description="是否在重建完成后自动跑一次检索评估")
 
 
 class SystemBenchmarkRequest(BaseModel):
+    """Input schema for the system-level benchmark route."""
     retrieval_dataset_path: Optional[str] = Field(
         default=None,
         description="检索 benchmark 数据集路径，默认读取 local_agent_api/data/eval/retrieval_eval_dataset.jsonl",

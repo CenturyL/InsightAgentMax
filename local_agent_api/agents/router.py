@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Rule-based complexity classifier for choosing simple vs. planned execution."""
+
 COMPLEX_KEYWORDS = (
     "比较",
     "对比",
@@ -16,8 +18,9 @@ COMPLEX_KEYWORDS = (
     "步骤",
 )
 
-
+# 复杂模式规则：len>60 | 有关键词
 def is_complex_query(query: str) -> tuple[bool, str]:
+    """Heuristically classify a user query and explain the routing reason."""
     query = (query or "").strip()
     if len(query) >= 60:
         return True, "query length exceeds complex-task threshold"
@@ -26,8 +29,10 @@ def is_complex_query(query: str) -> tuple[bool, str]:
         return True, f"matched complex keywords: {', '.join(matched)}"
     return False, "simple qa path"
 
-
+# orchestrator引用
+# 判断模式主函数
 def complexity_router_node(state: dict) -> dict:
+    """Persist router results into graph state for downstream branching."""
     latest_query = state["messages"][-1].content if state.get("messages") else ""
     is_complex, reason = is_complex_query(str(latest_query))
     return {

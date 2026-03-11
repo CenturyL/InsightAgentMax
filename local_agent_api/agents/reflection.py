@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+"""Retry weak or failed steps after the first execution pass."""
+
 from local_agent_api.agents.state import OrchestratorState
 from local_agent_api.retrieval.pipeline import retrieve_knowledge_bundle
 
 
 def _needs_reflection(state: OrchestratorState) -> bool:
+    """Only trigger reflection when at least one step is partial or failed."""
     results = state.get("step_results", [])
     if not results:
         return False
@@ -12,6 +15,7 @@ def _needs_reflection(state: OrchestratorState) -> bool:
 
 
 async def reflection_node(state: OrchestratorState) -> OrchestratorState:
+    """Expand recall for weak steps and update the plan/result status in place."""
     if not _needs_reflection(state):
         return state
 

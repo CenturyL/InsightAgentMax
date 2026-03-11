@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Offline answer-quality evaluation driven by real agent output plus an LLM judge."""
+
 import json
 import re
 from pathlib import Path
@@ -13,6 +15,7 @@ from local_agent_api.services.agent_service import get_agent_stream
 
 
 class GenerationEvalItem(BaseModel):
+    """One generation test case with optional gold answer and keyword hints."""
     query: str
     expected_answer: str | None = None
     expected_keywords: list[str] = Field(default_factory=list)
@@ -21,6 +24,7 @@ class GenerationEvalItem(BaseModel):
 
 
 class GenerationJudgeResult(BaseModel):
+    """Judge-model output for one generated answer."""
     answer_relevance: float = Field(ge=0.0, le=1.0)
     faithfulness: float = Field(ge=0.0, le=1.0)
     citation_accuracy: float = Field(ge=0.0, le=1.0)
@@ -28,6 +32,7 @@ class GenerationJudgeResult(BaseModel):
 
 
 class GenerationEvalMetrics(BaseModel):
+    """Aggregate generation-quality metrics with per-sample rationale and evidence."""
     dataset_size: int
     avg_answer_relevance: float
     avg_faithfulness: float
@@ -65,6 +70,7 @@ LOG_LINE_PREFIXES = ("🧭", "🛠️", "✅")
 
 
 def _extract_json_object(raw: str) -> str:
+    """Recover the JSON body even when the judge wraps it in prose or code fences."""
     raw = raw.strip()
     fenced_match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", raw, flags=re.S)
     if fenced_match:
@@ -76,6 +82,7 @@ def _extract_json_object(raw: str) -> str:
 
 
 def _keyword_coverage(answer: str, expected_keywords: list[str]) -> float:
+    """Cheap lexical coverage score to complement model-based judging."""
     if not expected_keywords:
         return 1.0
     hits = sum(1 for keyword in expected_keywords if keyword and keyword in answer)
@@ -83,6 +90,7 @@ def _keyword_coverage(answer: str, expected_keywords: list[str]) -> float:
 
 
 def _sanitize_agent_answer(answer: str) -> str:
+    """Remove internal trace lines before sending the answer to the judge model."""
     lines = []
     for line in answer.splitlines():
         stripped = line.strip()
@@ -95,6 +103,7 @@ def _sanitize_agent_answer(answer: str) -> str:
 
 
 def load_generation_eval_dataset(dataset_path: str) -> list[GenerationEvalItem]:
+    """Load JSONL generation-eval cases."""
     path = Path(dataset_path)
     if not path.exists():
         raise FileNotFoundError(f"generation eval dataset not found: {dataset_path}")
@@ -118,6 +127,7 @@ async def _collect_agent_answer(
     task_mode: str | None = None,
     metadata_filters: dict[str, Any] | None = None,
 ) -> str:
+    """Run the real agent stream end-to-end and merge chunks into one answer string."""
     chunks = []
     async for chunk in get_agent_stream(
         query,
@@ -134,6 +144,7 @@ async def _judge_generation(
     model_answer: str,
     evidence: str,
 ) -> GenerationJudgeResult:
+    """Ask the advanced model to score a generated answer against evidence/gold text."""
     prompt = JUDGE_PROMPT.format(
         query=query,
         expected_answer=expected_answer or "无标准答案，仅根据问题和证据进行评估",
@@ -146,6 +157,7 @@ async def _judge_generation(
 
 
 async def run_generation_eval(dataset_path: str, candidate_k: int = 15) -> GenerationEvalMetrics:
+    """Run generation evaluation across the labeled dataset and aggregate scores."""
     items = load_generation_eval_dataset(dataset_path)
     if not items:
         return GenerationEvalMetrics(

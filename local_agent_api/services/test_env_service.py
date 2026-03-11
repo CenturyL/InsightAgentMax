@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Prepare a reproducible public-document corpus for ingestion and evaluation demos."""
+
 import json
 import re
 import subprocess
@@ -199,18 +201,22 @@ TEST_DOC_SOURCES = [
 
 
 def _project_root() -> Path:
+    """Resolve the project root from the service module location."""
     return Path(__file__).resolve().parent.parent
 
 
 def _test_docs_dir() -> Path:
+    """Directory that stores downloaded raw test documents and cleaned text files."""
     return _project_root() / "data" / "test_docs"
 
 
 def _eval_dir() -> Path:
+    """Directory that stores generated JSONL datasets for offline evaluation."""
     return _project_root() / "data" / "eval"
 
 
 def _download_if_needed(url: str, destination: Path, force_download: bool) -> None:
+    """Fetch a public document only when missing or when force refresh is requested."""
     if destination.exists() and not force_download:
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -240,6 +246,7 @@ def _download_if_needed(url: str, destination: Path, force_download: bool) -> No
 
 
 def _clean_html_to_text(raw_path: Path, clean_path: Path) -> None:
+    """Strip HTML tags/scripts/styles so the result is easier to chunk and index."""
     text = raw_path.read_text(encoding="utf-8", errors="ignore")
     text = re.sub(r"<script[\s\S]*?</script>", " ", text, flags=re.I)
     text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.I)
@@ -253,6 +260,7 @@ def _clean_html_to_text(raw_path: Path, clean_path: Path) -> None:
 
 
 def _metadata_from_source(source: dict[str, Any]) -> dict[str, Any]:
+    """Translate a test-source descriptor into ingestion metadata overrides."""
     return {
         "title": source.get("title"),
         "region": source.get("region"),
@@ -264,6 +272,7 @@ def _metadata_from_source(source: dict[str, Any]) -> dict[str, Any]:
 
 
 def _rewrite_eval_datasets(clean_paths: dict[str, Path]) -> dict[str, str]:
+    """Rebuild retrieval/generation JSONL datasets after documents are refreshed."""
     eval_dir = _eval_dir()
     eval_dir.mkdir(parents=True, exist_ok=True)
 
@@ -375,6 +384,7 @@ def rebuild_test_environment(
     force_download: bool = False,
     run_retrieval_eval: bool = True,
 ) -> dict[str, Any]:
+    """Download, clean, ingest, and optionally evaluate the demo test corpus."""
     test_docs_dir = _test_docs_dir()
     test_docs_dir.mkdir(parents=True, exist_ok=True)
 

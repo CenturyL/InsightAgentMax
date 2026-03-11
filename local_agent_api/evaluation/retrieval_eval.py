@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Offline retrieval metrics used to compare recall/precision/ranking quality."""
+
 import json
 import statistics
 import time
@@ -12,12 +14,14 @@ from local_agent_api.retrieval.pipeline import SearchStrategy, retrieve_knowledg
 
 
 class RetrievalEvalItem(BaseModel):
+    """One gold query with relevant sources and optional metadata filters."""
     query: str
     relevant_sources: list[str] = Field(default_factory=list)
     metadata_filters: dict[str, Any] | None = None
 
 
 class RetrievalEvalMetrics(BaseModel):
+    """Aggregate retrieval metrics plus per-query diagnostic details."""
     dataset_size: int
     top_k: int
     strategy: str
@@ -32,10 +36,12 @@ class RetrievalEvalMetrics(BaseModel):
 
 
 def _normalize_source(source: str) -> str:
+    """Compare sources by basename to avoid path-prefix differences across machines."""
     return Path(source).name.lower().strip()
 
 
 def _match_relevance(retrieved_sources: list[str], relevant_sources: list[str]) -> int:
+    """Count unique source-level hits rather than duplicated chunk-level hits."""
     normalized_relevant = {_normalize_source(source) for source in relevant_sources}
     seen = set()
     hits = 0
@@ -50,6 +56,7 @@ def _match_relevance(retrieved_sources: list[str], relevant_sources: list[str]) 
 
 
 def _first_relevant_rank(retrieved_sources: list[str], relevant_sources: list[str]) -> int | None:
+    """Return the first unique hit rank for reciprocal-rank style metrics."""
     normalized_relevant = {_normalize_source(source) for source in relevant_sources}
     seen = set()
     for idx, source in enumerate(retrieved_sources, start=1):
@@ -63,6 +70,7 @@ def _first_relevant_rank(retrieved_sources: list[str], relevant_sources: list[st
 
 
 def _dcg(relevance_flags: list[int]) -> float:
+    """Compute discounted cumulative gain for the current ranking."""
     score = 0.0
     for idx, rel in enumerate(relevance_flags, start=1):
         if rel:
@@ -71,6 +79,7 @@ def _dcg(relevance_flags: list[int]) -> float:
 
 
 def _unique_retrieved_sources(retrieved_sources: list[str]) -> list[str]:
+    """Collapse multiple chunks from the same source into one evaluation item."""
     unique = []
     seen = set()
     for source in retrieved_sources:
@@ -83,6 +92,7 @@ def _unique_retrieved_sources(retrieved_sources: list[str]) -> list[str]:
 
 
 def _p95(values: list[float]) -> float:
+    """Small helper for the latency tail metric shown in benchmark panels."""
     if not values:
         return 0.0
     if len(values) == 1:
@@ -91,6 +101,7 @@ def _p95(values: list[float]) -> float:
 
 
 def load_retrieval_eval_dataset(dataset_path: str) -> list[RetrievalEvalItem]:
+    """Load JSONL retrieval labels from disk into typed eval items."""
     path = Path(dataset_path)
     if not path.exists():
         raise FileNotFoundError(f"retrieval eval dataset not found: {dataset_path}")
@@ -115,6 +126,7 @@ def run_retrieval_eval(
     candidate_k: int = 15,
     strategy: SearchStrategy = "hybrid_rerank",
 ) -> RetrievalEvalMetrics:
+    """Run one retrieval strategy against the gold dataset and summarize metrics."""
     items = load_retrieval_eval_dataset(dataset_path)
     if not items:
         return RetrievalEvalMetrics(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Planner node: turn a natural-language task into a small structured step list."""
+
 import json
 import re
 
@@ -41,8 +43,9 @@ class PlannerStepSchema(BaseModel):
 
 PLANNER_STEPS_ADAPTER = TypeAdapter(list[PlannerStepSchema])
 
-
+# 兜底，返回固定通用prompt
 def _fallback_plan(query: str) -> list[PlanStep]:
+    """Return a safe default plan when the model output cannot be parsed."""
     return [
         {
             "step_id": "step_1",
@@ -70,25 +73,31 @@ def _fallback_plan(query: str) -> list[PlanStep]:
         },
     ]
 
-
+# 从模型回复里提取并初步处理 JSON 块或数组
 def _extract_json_block(raw: str) -> str:
-    raw = raw.strip()
+    """Pull the most likely JSON array out of a model response with prose/fences."""
+    raw = raw.strip() # 去首尾空格
+    # 优先找 ```json ... ``` ,再找 ``` ... ```
     fenced_match = re.search(r"```(?:json)?\s*(\[.*\])\s*```", raw, flags=re.S)
     if fenced_match:
         return fenced_match.group(1)
-
+    # 再找最外层 [...] 或 {...}
     array_match = re.search(r"(\[.*\])", raw, flags=re.S)
     if array_match:
         return array_match.group(1)
-
+    # 啥也没有，原样返回
     return raw
 
-
+# LLM回复 校验与标准化
 def _normalize_plan(raw: str, query: str) -> list[PlanStep]:
+    """Parse, validate, and normalize planner output into executor-ready steps."""
+    # 先把json变成内存字典python对象（调用初步处理）
     parsed = json.loads(_extract_json_block(raw))
+    # 格式校验（TypeAdapter）
     validated = PLANNER_STEPS_ADAPTER.validate_python(parsed)
-
+    # 定义最终标准化 空壳结果
     normalized: list[PlanStep] = []
+    # 动态补齐缺失数据&塞进结果
     for idx, item in enumerate(validated[:4], start=1):
         normalized.append(
             {
@@ -103,9 +112,12 @@ def _normalize_plan(raw: str, query: str) -> list[PlanStep]:
 
     return normalized or _fallback_plan(query)
 
-
+# planner主函数，直接显式用advanced_model
 async def planner_node(state: OrchestratorState) -> OrchestratorState:
+    """Generate a structured execution plan for the complex-task graph."""
+    # 拿最后一个query
     query = str(state["messages"][-1].content) if state.get("messages") else ""
+    # 组装prompt
     prompt = PLANNER_PROMPT.format(
         query=query,
         task_mode=state.get("task_mode", "qa"),
@@ -113,6 +125,7 @@ async def planner_node(state: OrchestratorState) -> OrchestratorState:
     )
 
     try:
+        # 拿回复&标准化
         response = await advanced_model.ainvoke(prompt)
         raw = response.content.strip()
         normalized = _normalize_plan(raw, query)
