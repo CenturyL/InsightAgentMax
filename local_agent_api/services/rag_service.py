@@ -7,10 +7,7 @@ from langchain_ollama import ChatOllama
 from local_agent_api.core.config import settings
 from local_agent_api.retrieval.citation import format_citations
 from local_agent_api.retrieval.pipeline import (
-    format_docs,
-    process_and_store_document,
     retrieve_knowledge_bundle,
-    search_knowledge,
 )
 
 # 异步流串联各功能

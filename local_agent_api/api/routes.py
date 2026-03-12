@@ -13,7 +13,7 @@ from local_agent_api.api.schemas import (
     SystemBenchmarkRequest,
 )
 from langchain_core.messages import HumanMessage
-from local_agent_api.services.rag_service import process_and_store_document
+from local_agent_api.retrieval.pipeline import process_and_store_document
 from local_agent_api.services.eval_service import (
     run_generation_eval_job,
     run_retrieval_compare_job,

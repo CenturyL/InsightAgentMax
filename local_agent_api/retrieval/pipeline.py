@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import re
 import shutil
 import subprocess
@@ -24,6 +25,7 @@ from local_agent_api.retrieval.citation import build_citations
 class RetrievalBundle:
     query: str
     docs: list[Document]
+    parent_docs: list[Document]
     context_text: str
     citations: list[dict]
     applied_filters: dict[str, Any]
@@ -118,6 +120,88 @@ def compute_file_hash(file_path: str) -> str:
     return h.hexdigest()
 
 
+def _parent_store_dir() -> Path:
+    path = Path(settings.PARENT_STORE_PATH)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _parent_store_file(file_hash: str) -> Path:
+    return _parent_store_dir() / f"{file_hash}.json"
+
+
+def _split_parent_id(parent_id: str) -> tuple[str, str] | None:
+    if not parent_id or "-" not in parent_id:
+        return None
+    file_hash, block_id = parent_id.rsplit("-", 1)
+    return file_hash, block_id
+
+
+def _persist_parent_documents(parent_docs: list[Document], file_hash: str) -> None:
+    if not parent_docs:
+        return
+
+    payload = {
+        "file_hash": file_hash,
+        "documents": [
+            {
+                "page_content": doc.page_content,
+                "metadata": doc.metadata or {},
+            }
+            for doc in parent_docs
+        ],
+    }
+    _parent_store_file(file_hash).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _load_parent_documents_by_hash(file_hash: str) -> list[Document]:
+    store_file = _parent_store_file(file_hash)
+    if not store_file.exists():
+        return []
+
+    payload = json.loads(store_file.read_text(encoding="utf-8"))
+    documents = payload.get("documents", [])
+    return [
+        Document(
+            page_content=item.get("page_content", ""),
+            metadata=item.get("metadata", {}) or {},
+        )
+        for item in documents
+        if item.get("page_content")
+    ]
+
+
+def get_parent_documents(parent_ids: list[str]) -> list[Document]:
+    ordered_parent_ids: list[str] = []
+    seen_parent_ids: set[str] = set()
+    for parent_id in parent_ids:
+        if not parent_id or parent_id in seen_parent_ids:
+            continue
+        seen_parent_ids.add(parent_id)
+        ordered_parent_ids.append(parent_id)
+
+    # parent_id -> parent 文本的映射，避免重复读文件
+    parent_lookup: dict[str, Document] = {}
+    loaded_hashes: set[str] = set()
+    for parent_id in ordered_parent_ids:
+        parsed = _split_parent_id(parent_id)
+        if not parsed:
+            continue
+        file_hash, _ = parsed
+        if file_hash in loaded_hashes:
+            continue
+        loaded_hashes.add(file_hash)
+        for doc in _load_parent_documents_by_hash(file_hash):
+            stored_parent_id = (doc.metadata or {}).get("parent_id")
+            if stored_parent_id:
+                parent_lookup[stored_parent_id] = doc
+
+    return [parent_lookup[parent_id] for parent_id in ordered_parent_ids if parent_id in parent_lookup]
+
+# 判断是不是标题
 def _heading_level(line: str) -> str | None:
     patterns = (
         r"^第[一二三四五六七八九十百]+[章节条]",
@@ -132,54 +216,6 @@ def _heading_level(line: str) -> str | None:
 
 def _is_table_like(line: str) -> bool:
     return "|" in line or "\t" in line or re.search(r"\s{4,}", line) is not None
-
-
-def _extract_structured_blocks(text: str) -> list[dict[str, str]]:
-    normalized = re.sub(r"\r\n?", "\n", text)
-    lines = [line.strip() for line in normalized.split("\n")]
-
-    blocks: list[dict[str, str]] = []
-    current_title = "root"
-    current_lines: list[str] = []
-    current_type = "text"
-
-    def flush() -> None:
-        nonlocal current_lines, current_type
-        content = "\n".join(line for line in current_lines if line).strip()
-        if content:
-            blocks.append(
-                {
-                    "title": current_title,
-                    "content": content,
-                    "block_type": current_type,
-                }
-            )
-        current_lines = []
-        current_type = "text"
-
-    for raw_line in lines:
-        if not raw_line:
-            if current_lines:
-                current_lines.append("")
-            continue
-
-        heading = _heading_level(raw_line)
-        if heading:
-            flush()
-            current_title = heading
-            continue
-
-        if _is_table_like(raw_line):
-            if current_type != "table" and current_lines:
-                flush()
-            current_type = "table"
-        elif current_type == "table" and current_lines:
-            flush()
-
-        current_lines.append(raw_line)
-
-    flush()
-    return blocks
 
 
 def _html_to_text(html: str) -> str:
@@ -236,7 +272,7 @@ def _ocr_image_to_text(file_path: str) -> str:
 
     raise RuntimeError("image OCR returned empty text")
 
-
+# 加载文件 & 清理 & 转换langchain的doc格式
 def _load_documents(file_path: str) -> list[Document]:
     suffix = Path(file_path).suffix.lower()
     if suffix == ".pdf":
@@ -272,6 +308,66 @@ def _annotate_metadata(
     return annotated
 
 
+# 先 block -- 识别“结构块”（标题、表格、正文）
+def _extract_structured_blocks(text: str) -> list[dict[str, str]]:
+    # 统一换行符 & 逐行切分成待处理的 行们lines[]
+    normalized = re.sub(r"\r\n?", "\n", text)
+    lines = [line.strip() for line in normalized.split("\n")] # 按 \n 切分成行，两段去空白
+    # 预先定义好 blocks&缓存区
+    blocks: list[dict[str, str]] = []
+    current_title = "root"
+    current_lines: list[str] = []
+    current_type = "text"
+    # 提交当前块并刷新缓存区
+    def flush() -> None:
+        nonlocal current_lines, current_type
+        # 过滤掉空行
+        content = "\n".join(line for line in current_lines if line).strip()
+        # 若有内容就提交block
+        if content:
+            blocks.append(
+                {
+                    "title": current_title,
+                    "content": content,
+                    "block_type": current_type,
+                }
+            )
+        # 清空还原缓冲区
+        current_lines = []
+        current_type = "text"
+    # 逐行扫描
+    for raw_line in lines:
+        # 空行：当前有内容才加上空行
+        if not raw_line:
+            if current_lines:
+                current_lines.append("")
+            continue
+        # 标题行：之前积累的先提交block，打上title（标题行本身不进 content）
+        heading = _heading_level(raw_line)
+        if heading:
+            flush()
+            current_title = heading
+            continue
+
+        if _is_table_like(raw_line):
+        # 表格行：
+            # 有内容未提交，先提交block，改type为table
+            if current_type != "table" and current_lines:
+                flush()
+            current_type = "table"
+        # 正文行：
+            # 上一行是表格，先提交block
+        elif current_type == "table" and current_lines:
+            flush()
+        # 只有标题和表格行才能走到这里（其他的continue掉了）
+        current_lines.append(raw_line)
+
+    flush()
+    return blocks
+
+
+# 切正文：
+# 先按段落分，长段再切分，，保留overlap
 def _split_text_block(doc: Document) -> list[Document]:
     content = doc.page_content.strip()
     if not content:
@@ -324,6 +420,8 @@ def _split_text_block(doc: Document) -> list[Document]:
     return chunks
 
 
+# 切表格
+# 若干行组成一个chunk，保留overlap
 def _split_table_block(doc: Document) -> list[Document]:
     rows = [line.strip() for line in doc.page_content.splitlines() if line.strip()]
     if not rows:
@@ -346,20 +444,24 @@ def _split_table_block(doc: Document) -> list[Document]:
     return chunks
 
 
+# chunk 主函数（parent-child）
+# 调用_extract_structured_blocks后
+# 先切成 parent block，打metadata，再切成 child chunk
 def _build_chunk_documents(
     raw_docs: list[Document],
     file_path: str,
     file_hash: str,
     metadata_overrides: dict[str, Any] | None = None,
-) -> list[Document]:
+) -> tuple[list[Document], list[Document]]:
+    
+    # 构建 parent 块（切上_extract构造的block）
     parent_docs: list[Document] = []
-
     for doc in raw_docs:
         base_metadata = doc.metadata or {}
         blocks = _extract_structured_blocks(doc.page_content)
         if not blocks:
             blocks = [{"title": "root", "content": doc.page_content, "block_type": "text"}]
-
+        # 遍历大block块，补metadata
         for idx, block in enumerate(blocks, start=1):
             metadata = _annotate_metadata(
                 base_metadata,
@@ -370,10 +472,12 @@ def _build_chunk_documents(
             )
             metadata["section_path"] = block["title"]
             metadata["block_type"] = block["block_type"]
-            metadata["parent_id"] = f"{file_hash}-{idx}"
+            metadata["parent_id"] = f"{file_hash}-{idx}" # parent编号为：hash-块序号
             metadata["chunk_strategy"] = "header_aware_parent"
+            # 打包成langchain的doc
             parent_docs.append(Document(page_content=block["content"], metadata=metadata))
-
+    
+    # 构建child chunk（切 parent block）
     child_docs: list[Document] = []
     for parent in parent_docs:
         block_type = parent.metadata.get("block_type", "text")
@@ -384,11 +488,13 @@ def _build_chunk_documents(
 
     for child in child_docs:
         child.metadata["parent_section"] = child.metadata.get("section_path", "root")
-    return child_docs
+    return parent_docs, child_docs
 
-
+# 上传文件--主函数
 def process_and_store_document(file_path: str, metadata_overrides: dict[str, Any] | None = None) -> int:
+    # 计算hash
     file_hash = compute_file_hash(file_path)
+    # 去重
     vector_store = get_vector_store()
     existing = vector_store.get(limit=10000, include=["metadatas"])
     existing_metadatas = existing.get("metadatas", []) if existing else []
@@ -399,11 +505,17 @@ def process_and_store_document(file_path: str, metadata_overrides: dict[str, Any
     if duplicated:
         print(f"⚠️ 文件已存在于知识库（hash={file_hash[:8]}...），跳过重复入库。")
         return 0
-
+    # 加载文档内容 & 切片 & 元数据挂载
     docs = _load_documents(file_path)
-    splits = _build_chunk_documents(docs, file_path, file_hash, metadata_overrides=metadata_overrides)
-
+    parent_docs, splits = _build_chunk_documents(
+        docs,
+        file_path,
+        file_hash,
+        metadata_overrides=metadata_overrides,
+    )
+    # Embedding & Persisting
     vector_store.add_documents(splits)
+    _persist_parent_documents(parent_docs, file_hash)
     return len(splits)
 
 
@@ -432,7 +544,7 @@ def has_document_source(file_path: str) -> bool:
     existing_metadatas = existing.get("metadatas", []) if existing else []
     return any((metadata or {}).get("source") == file_path for metadata in existing_metadatas)
 
-
+# 基础的向量检索, 去Chroma做similarity search，初筛
 def dense_search_knowledge(
     query: str,
     k: int = 3,
@@ -510,7 +622,7 @@ def search_knowledge(
     reranked = compressor.compress_documents(merged, query)
     return list(reranked)
 
-
+# 关键词召回补充，按词命中数排序，防止一些精确术语被 dense 检索漏掉
 def lexical_search_knowledge(
     query: str,
     k: int = 3,
@@ -553,10 +665,18 @@ def retrieve_knowledge_bundle(
         metadata_filters=applied_filters,
         strategy=strategy,
     )
+    parent_ids = [
+        (doc.metadata or {}).get("parent_id")
+        for doc in docs
+        if (doc.metadata or {}).get("parent_id")
+    ]
+    parent_docs = get_parent_documents(parent_ids)
+    context_docs = parent_docs or docs
     return RetrievalBundle(
         query=query,
         docs=docs,
-        context_text=format_docs(docs),
-        citations=build_citations(docs),
+        parent_docs=parent_docs,
+        context_text=format_docs(context_docs),
+        citations=build_citations(context_docs),
         applied_filters=applied_filters,
     )

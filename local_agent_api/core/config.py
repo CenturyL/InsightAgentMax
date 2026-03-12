@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     
     # RAG 向量数据库与模型配置
     VECTOR_STORE_PATH: str = str(_PROJECT_ROOT / "data" / "chroma_db")
+    PARENT_STORE_PATH: str = str(_PROJECT_ROOT / "data" / "parent_store")
     # 这里选择一个在 Mac 本地跑得快、且对中文友好的轻量级开源 Embedding 模型
     EMBEDDING_MODEL: str = "shibing624/text2vec-base-chinese" 
     EMBEDDING_DEVICE: str = "auto"
