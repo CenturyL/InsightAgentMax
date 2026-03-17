@@ -22,8 +22,8 @@ from local_agent_api.services.eval_service import (
 )
 from local_agent_api.services.agent_service import get_agent_stream
 from local_agent_api.services.test_env_service import rebuild_test_environment
-from langchain_ollama import ChatOllama
 from local_agent_api.core.config import settings
+from local_agent_api.core.llm import create_basic_model
 
 router = APIRouter()
 
@@ -35,11 +35,7 @@ async def chat_stream(request: ChatRequest):
     与本地 Qwen 模型进行直接流式对话。
     """
     # 按请求中的 temperature 动态创建模型实例（轻量，不缓存）
-    llm = ChatOllama(
-        base_url=settings.OLLAMA_BASE_URL,
-        model=settings.LLM_MODEL,
-        temperature=request.temperature,
-    )
+    llm = create_basic_model(temperature=request.temperature)
 
     # 2. 构建消息体
     messages = [HumanMessage(content=request.query)]

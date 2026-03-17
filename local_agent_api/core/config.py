@@ -10,8 +10,15 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 class Settings(BaseSettings):
     # 默认配置：如果环境变量里没有设置，就用这些默认值
     PROJECT_NAME: str = "Local Knowledge Agent API"
-    OLLAMA_BASE_URL: str = "http://10.144.144.7:11434" # Ollama 远程(本地部署)服务配置
-    LLM_MODEL: str = "qwen3.5:9b"
+    # 基础模型提供方：支持 ollama 或 openai_compatible（vLLM / LM Studio / OneAPI 等）
+    BASIC_MODEL_PROVIDER: str = "ollama"
+    BASIC_MODEL_BASE_URL: str = "http://10.144.144.7:11434"
+    BASIC_MODEL_NAME: str = "qwen3.5:9b"
+    BASIC_MODEL_API_KEY: str = "EMPTY"
+
+    # 兼容旧配置名，避免已有 .env / 文档 立即失效
+    OLLAMA_BASE_URL: Optional[str] = None
+    LLM_MODEL: Optional[str] = None
     
     # 【新增】DeepSeek 官方 API 配置 (完全兼容 OpenAI SDK)
     # 必须在 .env 文件中设置：DEEPSEEK_API_KEY=your_real_key_here
