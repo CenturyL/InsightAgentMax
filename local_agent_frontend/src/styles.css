@@ -731,6 +731,24 @@ button {
   display: none;
 }
 
+.toast-message {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+  transform: translateX(-50%);
+  z-index: 30;
+  max-width: min(90vw, 360px);
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(19, 29, 45, 0.88);
+  color: #f7f9fd;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(8, 14, 25, 0.2);
+  pointer-events: none;
+}
+
 @media (max-width: 1280px) {
   .app-shell {
     grid-template-columns: clamp(250px, 24vw, 290px) minmax(0, 1fr) clamp(250px, 26vw, 290px);
@@ -750,6 +768,7 @@ button {
   .chat-column {
     grid-column: 1;
     height: 100vh;
+    grid-template-rows: calc(52px + env(safe-area-inset-top, 0px)) minmax(0, 1fr) auto;
   }
 
   .sidebar,
@@ -791,6 +810,18 @@ button {
     justify-content: center;
   }
 
+  .chat-header {
+    padding: env(safe-area-inset-top, 0px) 14px 0;
+  }
+
+  .compact-header {
+    min-height: calc(52px + env(safe-area-inset-top, 0px));
+  }
+
+  .chat-header-row {
+    min-height: 52px;
+  }
+
   .drawer-overlay {
     display: block;
     position: fixed;
@@ -804,19 +835,20 @@ button {
   }
 
   .composer-shell {
-    min-height: 5.6rem;
+    min-height: 5.25rem;
+    display: grid;
+    grid-template-rows: minmax(0, auto) auto;
   }
 
   .composer textarea {
-    min-height: 5.6rem;
+    min-height: 3rem;
     max-height: 9rem;
-    padding: 10px 12px 48px;
+    padding: 10px 12px 10px;
   }
 
   .composer-inner-toolbar {
-    left: 10px;
-    right: 10px;
-    bottom: 10px;
+    position: static;
+    padding: 0 10px 10px;
     gap: 6px;
     justify-content: space-between;
     align-items: center;
@@ -824,7 +856,7 @@ button {
   }
 
   .inline-select {
-    flex: 1 1 42%;
+    flex: 1 1 auto;
     min-width: 0;
     height: 32px;
     padding: 0 8px;
@@ -851,11 +883,11 @@ button {
   }
 
   .toggle-button {
-    max-width: 28%;
+    max-width: 7.6rem;
   }
 
   .primary-button {
-    min-width: 3.75rem;
+    min-width: 3.4rem;
   }
 
   .toggle-full {
@@ -873,5 +905,12 @@ button {
   .field textarea {
     min-height: 72px;
     max-height: 180px;
+  }
+
+  .toast-message {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    max-width: min(88vw, 320px);
+    padding: 9px 12px;
+    font-size: 0.78rem;
   }
 }

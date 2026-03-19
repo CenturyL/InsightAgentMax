@@ -82,7 +82,10 @@ const TRACE_PREFIXES = [
 ];
 
 function uid(): string {
-  return crypto.randomUUID() as string;
+  const randomUUID = globalThis.crypto?.randomUUID?.bind(globalThis.crypto);
+  if (randomUUID) return randomUUID();
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `id-${Date.now()}-${randomPart}`;
 }
 
 function isTraceBlock(text: string) {
@@ -210,11 +213,13 @@ export default function App() {
   const [assetsLoading, setAssetsLoading] = useState(false);
   const [assetsSaving, setAssetsSaving] = useState(false);
   const [error, setError] = useState("");
+  const [toastMessage, setToastMessage] = useState("");
   const [activeTraceMessageId, setActiveTraceMessageId] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showTracePanel, setShowTracePanel] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
 
   const activeTraceMessage = useMemo(
     () =>
@@ -257,6 +262,25 @@ export default function App() {
   useEffect(() => {
     void loadRuntimeAssets();
   }, [apiBase]);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
+  function showToast(message: string) {
+    setToastMessage(message);
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastMessage("");
+      toastTimerRef.current = null;
+    }, 2200);
+  }
 
   async function loadRuntimeAssets() {
     setAssetsLoading(true);
@@ -370,7 +394,7 @@ export default function App() {
 
   async function handleSend() {
     if (!userId.trim()) {
-      setError("发送前必须填写 userId。");
+      showToast("请先在菜单里填写 User ID");
       return;
     }
     if (!query.trim() || isSending) return;
@@ -486,7 +510,7 @@ export default function App() {
             <input
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
-              placeholder="必填，否则禁止发送"
+              placeholder="请先在菜单里填写 User ID"
               className={!userId.trim() ? "required" : ""}
             />
             <div className="field-note field-note-strong">填写 User ID 以启用长期记忆</div>
@@ -643,7 +667,7 @@ export default function App() {
               rows={1}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={userId.trim() ? "Type a message..." : "请先填写 User ID"}
+              placeholder={userId.trim() ? "Type a message..." : "请先在菜单里填写 User ID"}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -776,6 +800,7 @@ export default function App() {
           }}
         />
       ) : null}
+      {toastMessage ? <div className="toast-message">{toastMessage}</div> : null}
     </div>
   );
 }
