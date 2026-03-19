@@ -335,8 +335,10 @@ export default function App() {
   const [showTracePanel, setShowTracePanel] = useState(false);
   const [expandedThoughtIds, setExpandedThoughtIds] = useState<string[]>([]);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const messagesRef = useRef<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const shouldAutoScrollRef = useRef(true);
 
   const activeTraceMessage = useMemo(
     () =>
@@ -355,7 +357,8 @@ export default function App() {
   );
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!shouldAutoScrollRef.current) return;
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, isSending]);
 
   useEffect(() => {
@@ -406,6 +409,13 @@ export default function App() {
       if (!expanded && has) return prev.filter((id) => id !== messageId);
       return prev;
     });
+  }
+
+  function updateAutoScrollLock() {
+    const el = messagesRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    shouldAutoScrollRef.current = distanceFromBottom <= 96;
   }
 
   async function loadRuntimeAssets() {
@@ -539,6 +549,7 @@ export default function App() {
     setMessages((prev) => [...prev, userMessage, assistantPlaceholder]);
     setActiveTraceMessageId(assistantPlaceholder.id);
     setQuery("");
+    shouldAutoScrollRef.current = true;
 
     try {
       const response = await fetch(`${apiBase}/chat/agent`, {
@@ -751,7 +762,7 @@ export default function App() {
           </div>
         </header>
 
-        <section className="messages">
+        <section className="messages" ref={messagesRef} onScroll={updateAutoScrollLock}>
           {messages.length === 0 ? (
             <div className="empty-state">
               <h2>开始一个新对话</h2>
@@ -845,10 +856,10 @@ export default function App() {
             />
             <div className="composer-inner-toolbar">
               <label className="inline-select">
-                <span className="toolbar-label">模型</span>
+                  <span className="toolbar-label">模型</span>
                 <select value={modelChoice} onChange={(e) => setModelChoice(e.target.value)}>
-                  <option value="local_qwen">Local Qwen</option>
-                  <option value="deepseek">DeepSeek</option>
+                  <option value="local_qwen">Qwen 3.5 9B</option>
+                  <option value="deepseek">DeepSeek Reasoner</option>
                   <option value="minimax">MiniMax M2.7</option>
                 </select>
               </label>
