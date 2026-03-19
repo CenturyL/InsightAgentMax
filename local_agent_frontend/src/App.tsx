@@ -695,7 +695,7 @@ export default function App() {
               <button
                 className="primary-button"
                 onClick={() => void handleSend()}
-                disabled={!userId.trim() || !query.trim() || isSending}
+                disabled={!query.trim() || isSending}
               >
                 {isSending ? "发送中" : "发送"}
               </button>
