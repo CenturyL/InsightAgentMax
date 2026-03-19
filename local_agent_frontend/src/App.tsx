@@ -701,7 +701,10 @@ export default function App() {
                       ) : null}
                       {message.role === "assistant" && thought ? (
                         <details className="thought-block" open={!showCollapsedThought}>
-                          <summary>思考过程</summary>
+                          <summary>
+                            <span className="thought-summary-collapsed">▸ 思考过程（展开）</span>
+                            <span className="thought-summary-open">▾ 思考过程（折叠）</span>
+                          </summary>
                           <div
                             className="thought-body"
                             dangerouslySetInnerHTML={renderMarkdown(thought)}

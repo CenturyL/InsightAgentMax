@@ -461,6 +461,24 @@ button {
   font-weight: 600;
 }
 
+.thought-block summary span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.thought-summary-open {
+  display: none;
+}
+
+.thought-block[open] .thought-summary-collapsed {
+  display: none;
+}
+
+.thought-block[open] .thought-summary-open {
+  display: inline-flex;
+}
+
 .thought-block summary::-webkit-details-marker {
   display: none;
 }
