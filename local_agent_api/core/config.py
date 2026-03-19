@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # 禁止在代码中硬编码 API Key，否则提交 git 会造成密钥泄露
     DEEPSEEK_API_KEY: str  # 无默认值，强制从环境变量/.env 文件读取
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
-    DEEPSEEK_MODEL: str = "deepseek-chat" # 也可以换成 deepseek-reasoner
+    DEEPSEEK_MODEL: str = "deepseek-reasoner"
     MINIMAX_API_KEY: Optional[str] = None
     MINIMAX_BASE_URL: str = "https://api.minimax.io/v1"
     MINIMAX_MODEL: str = "MiniMax-M2.5"
