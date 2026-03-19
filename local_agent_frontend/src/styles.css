@@ -444,6 +444,42 @@ button {
   margin-bottom: 0;
 }
 
+.thought-block {
+  margin: 0 0 12px;
+  border: 1px solid rgba(84, 99, 125, 0.12);
+  border-radius: 14px;
+  background: rgba(84, 99, 125, 0.04);
+  overflow: hidden;
+}
+
+.thought-block summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 12px;
+  color: #708099;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.thought-block summary::-webkit-details-marker {
+  display: none;
+}
+
+.thought-body {
+  padding: 0 12px 12px;
+  color: #7b879a;
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+
+.thought-body p:first-child {
+  margin-top: 0;
+}
+
+.thought-body p:last-child {
+  margin-bottom: 0;
+}
+
 .message-body pre,
 .trace-item {
   white-space: pre-wrap;

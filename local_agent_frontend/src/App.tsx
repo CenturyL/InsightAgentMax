@@ -96,6 +96,26 @@ function renderMarkdown(content: string) {
   return { __html: marked.parse(content) as string };
 }
 
+function splitThinkingContent(content: string): { thought: string; answer: string } {
+  if (!content) return { thought: "", answer: "" };
+  const start = content.indexOf("<think>");
+  if (start === -1) return { thought: "", answer: content };
+  const end = content.indexOf("</think>", start + 7);
+  if (end === -1) {
+    return {
+      thought: content.slice(start + 7).trim(),
+      answer: content.slice(0, start).trim(),
+    };
+  }
+  const before = content.slice(0, start).trim();
+  const thought = content.slice(start + 7, end).trim();
+  const after = content.slice(end + 8).trim();
+  return {
+    thought,
+    answer: [before, after].filter(Boolean).join("\n\n").trim(),
+  };
+}
+
 function createAssistantPlaceholder(): ChatMessage {
   return {
     id: uid(),
@@ -178,6 +198,24 @@ function parsePaeTrace(traces: string[]): ParsedPaeTrace {
       parsed.active = true;
       parsed.completed = true;
     }
+  }
+
+  if (parsed.planSteps.length > 0) {
+    parsed.active = true;
+    parsed.entered = true;
+    parsed.planning = true;
+  }
+  if (parsed.executionSteps.length > 0) {
+    parsed.active = true;
+  }
+  if (parsed.reflectionSteps.length > 0) {
+    parsed.active = true;
+    parsed.reflecting = true;
+  }
+  if (parsed.completed && parsed.planSteps.length > 0) {
+    parsed.entered = true;
+    parsed.planning = true;
+    parsed.generating = true;
   }
 
   return parsed;
@@ -639,22 +677,45 @@ export default function App() {
               className={`message-row ${message.role}`}
               onClick={() => message.role === "assistant" && setActiveTraceMessageId(message.id)}
             >
-              <div className="avatar">{message.role === "user" ? "你" : "AI"}</div>
-              <div className={`message-card ${message.role}`}>
-                <div className="message-meta">
-                  <span>{message.role === "user" ? "You" : "Assistant"}</span>
-                  {message.role === "assistant" ? (
-                    <span className="trace-count">{message.traces.length} trace</span>
-                  ) : null}
-                </div>
-                {message.role === "assistant" && parsePaeTrace(message.traces).active ? (
-                  <div className="pae-badge">PAE</div>
-                ) : null}
-                <div
-                  className="message-body"
-                  dangerouslySetInnerHTML={renderMarkdown(message.content || "处理中...")}
-                />
-              </div>
+              {(() => {
+                const parsedPae = message.role === "assistant" ? parsePaeTrace(message.traces) : null;
+                const { thought, answer } =
+                  message.role === "assistant"
+                    ? splitThinkingContent(message.content || "")
+                    : { thought: "", answer: message.content || "" };
+                const showCollapsedThought = Boolean(thought && answer);
+                const bodyContent = answer || (thought ? "" : message.content || "处理中...");
+
+                return (
+                  <>
+                    <div className="avatar">{message.role === "user" ? "你" : "AI"}</div>
+                    <div className={`message-card ${message.role}`}>
+                      <div className="message-meta">
+                        <span>{message.role === "user" ? "You" : "Assistant"}</span>
+                        {message.role === "assistant" ? (
+                          <span className="trace-count">{message.traces.length} trace</span>
+                        ) : null}
+                      </div>
+                      {message.role === "assistant" && parsedPae?.active ? (
+                        <div className="pae-badge">PAE</div>
+                      ) : null}
+                      {message.role === "assistant" && thought ? (
+                        <details className="thought-block" open={!showCollapsedThought}>
+                          <summary>思考过程</summary>
+                          <div
+                            className="thought-body"
+                            dangerouslySetInnerHTML={renderMarkdown(thought)}
+                          />
+                        </details>
+                      ) : null}
+                      <div
+                        className="message-body"
+                        dangerouslySetInnerHTML={renderMarkdown(bodyContent)}
+                      />
+                    </div>
+                  </>
+                );
+              })()}
             </article>
           ))}
           <div ref={bottomRef} />
