@@ -18,6 +18,7 @@ _model_choice_var: ContextVar[str] = ContextVar("tool_model_choice", default="lo
 _in_pae_var: ContextVar[bool] = ContextVar("tool_in_pae", default=False)
 _tool_trace_var: ContextVar[list[str]] = ContextVar("tool_trace", default=[])
 _tool_trace_queue_var: ContextVar[asyncio.Queue[str] | None] = ContextVar("tool_trace_queue", default=None)
+_last_pae_result_var: ContextVar[dict[str, Any] | None] = ContextVar("last_pae_result", default=None)
 
 
 def set_tool_metadata_filters(metadata_filters: dict[str, Any] | None):
@@ -56,6 +57,7 @@ def set_tool_request_context(
         "trace": _tool_trace_var.set([]),
         "trace_queue": _tool_trace_queue_var.set(trace_queue),
         "trace_queue_obj": trace_queue,
+        "last_pae_result": _last_pae_result_var.set(None),
     }
 
 
@@ -69,6 +71,7 @@ def reset_tool_request_context(tokens: dict[str, Any]) -> None:
     _in_pae_var.reset(tokens["in_pae"])
     _tool_trace_var.reset(tokens["trace"])
     _tool_trace_queue_var.reset(tokens["trace_queue"])
+    _last_pae_result_var.reset(tokens["last_pae_result"])
 
 
 def get_tool_thread_id() -> str:
@@ -108,3 +111,13 @@ def drain_tool_trace() -> list[str]:
 
 def get_tool_trace_queue(tokens: dict[str, Any]) -> asyncio.Queue[str] | None:
     return tokens.get("trace_queue_obj")
+
+
+def set_last_pae_result(result: dict[str, Any]) -> None:
+    _last_pae_result_var.set(result)
+
+
+def consume_last_pae_result() -> dict[str, Any] | None:
+    result = _last_pae_result_var.get()
+    _last_pae_result_var.set(None)
+    return result

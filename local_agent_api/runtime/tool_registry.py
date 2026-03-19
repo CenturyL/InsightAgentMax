@@ -14,6 +14,7 @@ from local_agent_api.retrieval.pipeline import retrieve_knowledge_bundle
 from local_agent_api.runtime.memory_bridge import search_long_term_memory_text
 from local_agent_api.services.tool_context import (
     append_tool_trace,
+    set_last_pae_result,
     get_tool_model_choice,
     get_tool_metadata_filters,
     get_tool_plan_mode,
@@ -173,6 +174,7 @@ async def _run_plan_and_execute_impl(query: str) -> tuple[str, dict[str, Any]]:
         metadata_filters=metadata_filters,
         trace_sink=append_tool_trace,
     )
+    set_last_pae_result(result)
     return result["final_answer"], result
 
 

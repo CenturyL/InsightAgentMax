@@ -14,7 +14,7 @@ from local_agent_api.core.llm import get_model_by_choice
 PLANNER_PROMPT = """你是一个复杂任务规划器。请根据用户目标，输出一个简洁、可执行的计划。
 
 要求：
-1. 仅输出 JSON 数组
+1. 仅输出 JSON 数组，不要输出任何额外说明、思考过程、解释、Markdown、代码块或表格
 2. 最多 4 个步骤
 3. 每个元素必须包含字段：
    step_id, goal, reason, required_capability, expected_output, status
@@ -22,6 +22,7 @@ PLANNER_PROMPT = """你是一个复杂任务规划器。请根据用户目标，
 5. 步骤要具体，可直接执行，避免空泛措辞
 6. required_capability 必须优先从以下能力中选择：
    rag_search, rag_search_uploaded, web_search, search_long_term_memory, get_current_time, analysis, synthesis
+7. 如果你想解释你的推理过程，也必须省略，最终只返回 JSON 数组本身
 
 用户目标：
 {query}

@@ -98,21 +98,21 @@ function renderMarkdown(content: string) {
 
 function splitThinkingContent(content: string): { thought: string; answer: string } {
   if (!content) return { thought: "", answer: "" };
-  const start = content.indexOf("<think>");
-  if (start === -1) return { thought: "", answer: content };
-  const end = content.indexOf("</think>", start + 7);
-  if (end === -1) {
-    return {
-      thought: content.slice(start + 7).trim(),
-      answer: content.slice(0, start).trim(),
-    };
+  const thinkPattern = /<think>([\s\S]*?)<\/think>/g;
+  const thoughts: string[] = [];
+  const answer = content.replace(thinkPattern, (_, value: string) => {
+    const trimmed = value.trim();
+    if (trimmed) thoughts.push(trimmed);
+    return "";
+  }).trim();
+
+  if (thoughts.length === 0) {
+    return { thought: "", answer: content };
   }
-  const before = content.slice(0, start).trim();
-  const thought = content.slice(start + 7, end).trim();
-  const after = content.slice(end + 8).trim();
+
   return {
-    thought,
-    answer: [before, after].filter(Boolean).join("\n\n").trim(),
+    thought: thoughts.join("\n\n---\n\n"),
+    answer,
   };
 }
 

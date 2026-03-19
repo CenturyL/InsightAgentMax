@@ -31,6 +31,7 @@ from local_agent_api.runtime.engine import (
 )
 from local_agent_api.runtime.workflow import run_plan_and_execute_once, stream_plan_and_execute
 from local_agent_api.services.tool_context import (
+    consume_last_pae_result,
     drain_tool_trace,
     get_tool_trace_queue,
     reset_tool_request_context,
@@ -238,7 +239,9 @@ async def get_agent_stream(
             return
 
         stream_had_content = False
+        emitted_trace_lines: set[str] = set()
         event_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        pae_tool_invoked = False
 
         async def _pump_events() -> None:
             async for event in agent.astream_events(inputs, config=config, version="v2"):
@@ -265,6 +268,7 @@ async def get_agent_stream(
                 if trace_task is not None and trace_task in done:
                     line = trace_task.result()
                     if line:
+                        emitted_trace_lines.add(line)
                         yield f"{line}\n\n"
                     continue
 
@@ -279,6 +283,8 @@ async def get_agent_stream(
                 kind = event["event"]
 
                 if kind == "on_chat_model_stream":
+                    if pae_tool_invoked:
+                        continue
                     chunk = event["data"]["chunk"]
                     if _should_suppress_stream_chunk(chunk):
                         continue
@@ -290,6 +296,7 @@ async def get_agent_stream(
                 elif kind == "on_tool_start":
                     tool_name = event["name"]
                     if tool_name == "run_plan_and_execute":
+                        pae_tool_invoked = True
                         yield "\n\n🧭 [PAE调用] 主循环决定进入 Plan-and-Execute 子流程。\n\n"
                     else:
                         yield f"\n\n🛠️ [工具调用] 决定调用工具：【{tool_name}】...\n\n"
@@ -297,8 +304,17 @@ async def get_agent_stream(
                 elif kind == "on_tool_end":
                     tool_name = event["name"]
                     if tool_name == "run_plan_and_execute":
-                        drain_tool_trace()
-                        yield "\n✅ [PAE完成] Plan-and-Execute 子流程执行完成，主循环继续决策。\n\n"
+                        for line in drain_tool_trace():
+                            if line not in emitted_trace_lines:
+                                emitted_trace_lines.add(line)
+                                yield f"{line}\n\n"
+                        final_result = consume_last_pae_result()
+                        yield "\n✅ [PAE完成] Plan-and-Execute 子流程执行完成，已直接输出最终结果。\n\n"
+                        if final_result and final_result.get("final_answer"):
+                            stream_had_content = True
+                            yield final_result["final_answer"]
+                        event_stream_done = True
+                        break
                     else:
                         yield f"\n✅ [工具完成] 工具【{tool_name}】执行完成，正在继续推理...\n\n"
         finally:
