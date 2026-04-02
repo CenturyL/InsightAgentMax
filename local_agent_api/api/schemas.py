@@ -24,6 +24,7 @@ class RuntimeSkillAsset(BaseModel):
     """前端可编辑的 Skill 文件。"""
     filename: str = Field(..., description="skill 文件名，如 research.md")
     content: str = Field(..., description="skill 文件内容")
+    source: str = Field(default="project", description="skill 来源：project 或 claude")
 
 
 class RuntimeAssetsResponse(BaseModel):
@@ -40,3 +41,62 @@ class RuntimeAssetsUpdateRequest(BaseModel):
     soul_md: str = Field(default="", description="persona/SOUL.md 新内容")
     memory_md: str = Field(default="", description="memory/MEMORY.md 新内容")
     skills: list[RuntimeSkillAsset] = Field(default_factory=list, description="需要保存的技能文件内容")
+
+
+class RuntimeMCPServerStatus(BaseModel):
+    server_name: str
+    transport: str
+    connected: bool = False
+    tool_names: list[str] = Field(default_factory=list)
+
+
+class RuntimeMCPServerConfig(BaseModel):
+    server_name: str
+    transport: str
+    command: Optional[str] = None
+    args: list[str] = Field(default_factory=list)
+    cwd: Optional[str] = None
+    url: Optional[str] = None
+    headers: dict[str, str] = Field(default_factory=dict)
+
+
+class RuntimeMCPConfigResponse(BaseModel):
+    config_text: str = Field(default="", description=".mcp.json 原始文本")
+    servers: list[RuntimeMCPServerConfig] = Field(default_factory=list, description="解析后的 MCP servers")
+    status: list[RuntimeMCPServerStatus] = Field(default_factory=list, description="当前 MCP 连接状态")
+
+
+class RuntimeMCPConfigUpdateRequest(BaseModel):
+    config_text: str = Field(..., description=".mcp.json 新内容")
+
+
+class SessionRequest(BaseModel):
+    user_id: str = Field(..., description="用户ID，直接作为历史会话归属键")
+
+
+class SessionSummary(BaseModel):
+    thread_id: str
+    user_id: str
+    title: str
+    created_at: str
+    updated_at: str
+    last_message_preview: str
+
+
+class SessionBootstrapResponse(BaseModel):
+    sessions: list[SessionSummary] = Field(default_factory=list)
+    current_thread_id: str
+
+
+class SessionListResponse(BaseModel):
+    sessions: list[SessionSummary] = Field(default_factory=list)
+
+
+class SessionMessage(BaseModel):
+    role: str
+    content: str
+
+
+class SessionMessagesResponse(BaseModel):
+    thread_id: str
+    messages: list[SessionMessage] = Field(default_factory=list)

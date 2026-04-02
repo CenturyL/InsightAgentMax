@@ -1,5 +1,8 @@
 import httpx
 import asyncio
+import pytest
+
+pytestmark = pytest.mark.skip(reason="遗留手工 RAG 接口联调脚本，依赖旧版接口，不纳入自动化 pytest。")
 
 async def test_rag_stream():
     # 注意这里请求的 URL 换成了 /chat/rag

@@ -4,11 +4,17 @@ __pycache__/
 
 # Local environment and secrets
 .env
+.env.*
 local_agent_api/.env
+local_agent_api/.env.*
 
 # Python caches and test artifacts
 .pytest_cache/
 .mypy_cache/
+*.log
+*.sqlite
+*.sqlite3
+*.db
 
 # Vector stores and local data artifacts
 local_agent_api/data/chroma_db/

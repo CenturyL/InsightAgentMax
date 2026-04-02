@@ -6,6 +6,7 @@ type Role = "user" | "assistant";
 type ChatMessage = {
   id: string;
   role: Role;
+  thought: string;
   content: string;
   traces: string[];
   createdAt: number;
@@ -35,6 +36,9 @@ type ParsedPaeTrace = {
   planSteps: PaePlanStep[];
   executionSteps: PaeExecutionStep[];
   reflectionSteps: Array<{ stepId: string; status: string }>;
+  activatedSkills: string[];
+  allowedTools: string[];
+  mcpToolCalls: string[];
   raw: string[];
 };
 
@@ -43,12 +47,6 @@ type CombinedPaeStep = {
   capability: string;
   goal: string;
   status: string;
-};
-
-type ParsedThinking = {
-  thought: string;
-  codeThought: string;
-  answer: string;
 };
 
 type UploadState = {
@@ -60,6 +58,7 @@ type UploadState = {
 type RuntimeSkillAsset = {
   filename: string;
   content: string;
+  source: string;
 };
 
 type RuntimeAssets = {
@@ -67,6 +66,53 @@ type RuntimeAssets = {
   soul_md: string;
   memory_md: string;
   skills: RuntimeSkillAsset[];
+};
+
+type RuntimeMCPServer = {
+  server_name: string;
+  transport: string;
+  command?: string | null;
+  args?: string[];
+  cwd?: string | null;
+  url?: string | null;
+  headers?: Record<string, string>;
+};
+
+type RuntimeMCPStatus = {
+  server_name: string;
+  transport: string;
+  connected: boolean;
+  tool_names: string[];
+};
+
+type RuntimeMCPConfig = {
+  config_text: string;
+  servers: RuntimeMCPServer[];
+  status: RuntimeMCPStatus[];
+};
+
+type SessionSummary = {
+  thread_id: string;
+  user_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  last_message_preview: string;
+};
+
+type SessionBootstrapResponse = {
+  sessions: SessionSummary[];
+  current_thread_id: string;
+};
+
+type SessionMessagesResponse = {
+  thread_id: string;
+  messages: Array<{ role: string; content: string }>;
+};
+
+type PromptPreset = {
+  label: string;
+  prompt: string;
 };
 
 const TRACE_PREFIXES = [
@@ -85,6 +131,24 @@ const TRACE_PREFIXES = [
   "🌐",
   "🔎",
   "⏱️",
+  "🧩",
+  "🧰",
+  "🤖",
+];
+
+const PROMPT_PRESETS: PromptPreset[] = [
+  {
+    label: "测试 MCP",
+    prompt: "请列出当前项目根目录下有哪些一级文件和文件夹，只使用 MCP 工具完成，不要猜测。",
+  },
+  {
+    label: "测试 MCP+SKILL",
+    prompt: "请抓取 https://modelcontextprotocol.io 的首页，告诉我这个网站主要是什么，只使用 MCP 工具，不要用你已有知识补充。",
+  },
+  {
+    label: "测试 PAE",
+    prompt: "请比较这个项目里的 skills/ 和 .claude/skills/ 两类 skill 的区别，按表格输出。",
+  },
 ];
 
 function uid(): string {
@@ -92,6 +156,17 @@ function uid(): string {
   if (randomUUID) return randomUUID();
   const randomPart = Math.random().toString(36).slice(2, 10);
   return `id-${Date.now()}-${randomPart}`;
+}
+
+function getSkillDisplayName(filename: string): string {
+  const normalized = filename.replace(/\\/g, "/");
+  const match = normalized.match(/([^/]+)\/SKILL\.md$/i);
+  if (match?.[1]) return match[1];
+  return normalized.replace(/\/SKILL\.md$/i, "").split("/").pop() || normalized;
+}
+
+function getSkillKey(skill: RuntimeSkillAsset): string {
+  return `${skill.source}:${skill.filename}`;
 }
 
 function isTraceBlock(text: string) {
@@ -116,57 +191,11 @@ function uniqueTextBlocks(blocks: string[]): string[] {
   return result;
 }
 
-function splitThinkingContent(content: string): ParsedThinking {
-  if (!content) return { thought: "", codeThought: "", answer: "" };
-  const thinkPattern = /<think>([\s\S]*?)<\/think>/g;
-  const thoughts: string[] = [];
-  let answer = content.replace(thinkPattern, (_, value: string) => {
-    const trimmed = value.trim();
-    if (trimmed) thoughts.push(trimmed);
-    return "";
-  }).trim();
-
-  const paeMarker = answer.indexOf("🧭 [计划模式]");
-  if (paeMarker > 0) {
-    const prefix = answer.slice(0, paeMarker).trim();
-    if (
-      prefix &&
-      [
-        "run_plan_and_execute",
-        "根据PAE规则",
-        "complexity=",
-        "我应该调用",
-        "让我调用",
-        "这是一个复杂任务",
-      ].some((marker) => prefix.includes(marker))
-    ) {
-      thoughts.push(prefix);
-      answer = answer.slice(paeMarker).trim();
-    }
-  }
-
-  if (thoughts.length === 0) {
-    return { thought: "", codeThought: "", answer: content };
-  }
-
-  const dedupedThoughts = uniqueTextBlocks(thoughts);
-  const thoughtText = dedupedThoughts.join("\n\n---\n\n");
-  const codePattern = /```[\s\S]*?```/g;
-  const codeThoughtBlocks = uniqueTextBlocks(thoughtText.match(codePattern) ?? []);
-  const codeThought = codeThoughtBlocks.join("\n\n");
-  const thought = thoughtText.replace(codePattern, "").replace(/\n{3,}/g, "\n\n").trim();
-
-  return {
-    thought,
-    codeThought,
-    answer,
-  };
-}
-
 function createAssistantPlaceholder(): ChatMessage {
   return {
     id: uid(),
     role: "assistant",
+    thought: "",
     content: "",
     traces: [],
     createdAt: Date.now(),
@@ -185,6 +214,9 @@ function parsePaeTrace(traces: string[], content = ""): ParsedPaeTrace {
     planSteps: [],
     executionSteps: [],
     reflectionSteps: [],
+    activatedSkills: [],
+    allowedTools: [],
+    mcpToolCalls: [],
     raw: traces,
   };
 
@@ -227,6 +259,29 @@ function parsePaeTrace(traces: string[], content = ""): ParsedPaeTrace {
     if (trace.startsWith("🔁 [反思修正]")) {
       parsed.active = true;
       parsed.reflecting = true;
+      continue;
+    }
+    if (trace.startsWith("🧩 [Skill激活]")) {
+      const [, payload = ""] = trace.split("] ");
+      parsed.activatedSkills = payload
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      continue;
+    }
+    if (trace.startsWith("🧰 [工具约束]")) {
+      const [, payload = ""] = trace.split("] ");
+      parsed.allowedTools = payload
+        .split("、")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      continue;
+    }
+    if (trace.startsWith("🧩 [MCP工具调用]")) {
+      const matched = trace.match(/【(.+?)】/);
+      if (matched?.[1]) {
+        parsed.mcpToolCalls.push(matched[1]);
+      }
       continue;
     }
     if (trace.startsWith("📎 [反思结果]")) {
@@ -310,10 +365,13 @@ function buildCombinedPaeSteps(parsed: ParsedPaeTrace): CombinedPaeStep[] {
 }
 
 export default function App() {
-  const [apiBase, setApiBase] = useState("/api/v2");
-  const [threadId] = useState(uid());
+  const apiBase = "/api/v3";
+  const [userIdInput, setUserIdInput] = useState("");
   const [userId, setUserId] = useState("");
-  const [modelChoice, setModelChoice] = useState("local_qwen");
+  const [currentThreadId, setCurrentThreadId] = useState("");
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [modelChoice, setModelChoice] = useState("deepseek_chat");
   const [forcePlan, setForcePlan] = useState(false);
   const [query, setQuery] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -326,8 +384,16 @@ export default function App() {
     memory_md: "",
     skills: [],
   });
+  const [selectedSkillFilename, setSelectedSkillFilename] = useState("");
+  const [mcpConfig, setMcpConfig] = useState<RuntimeMCPConfig>({
+    config_text: "",
+    servers: [],
+    status: [],
+  });
   const [assetsLoading, setAssetsLoading] = useState(false);
   const [assetsSaving, setAssetsSaving] = useState(false);
+  const [mcpLoading, setMcpLoading] = useState(false);
+  const [mcpSaving, setMcpSaving] = useState(false);
   const [error, setError] = useState("");
   const [toastMessage, setToastMessage] = useState("");
   const [activeTraceMessageId, setActiveTraceMessageId] = useState<string | null>(null);
@@ -347,6 +413,8 @@ export default function App() {
       null,
     [activeTraceMessageId, messages],
   );
+  const normalizedUserIdInput = userIdInput.trim();
+  const isConfirmedUserId = Boolean(userId.trim()) && userId.trim() === normalizedUserIdInput;
   const activePaeTrace = useMemo(
     () => parsePaeTrace(activeTraceMessage?.traces ?? [], activeTraceMessage?.content ?? ""),
     [activeTraceMessage],
@@ -381,7 +449,18 @@ export default function App() {
 
   useEffect(() => {
     void loadRuntimeAssets();
-  }, [apiBase]);
+    void loadRuntimeMcpConfig();
+  }, []);
+
+  useEffect(() => {
+    if (!runtimeAssets.skills.length) {
+      if (selectedSkillFilename) setSelectedSkillFilename("");
+      return;
+    }
+    if (!runtimeAssets.skills.some((skill) => getSkillKey(skill) === selectedSkillFilename)) {
+      setSelectedSkillFilename(getSkillKey(runtimeAssets.skills[0]));
+    }
+  }, [runtimeAssets.skills, selectedSkillFilename]);
 
   useEffect(() => {
     return () => {
@@ -390,6 +469,16 @@ export default function App() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!runtimeAssets.skills.length) {
+      setSelectedSkillFilename("");
+      return;
+    }
+    if (!runtimeAssets.skills.some((skill) => getSkillKey(skill) === selectedSkillFilename)) {
+      setSelectedSkillFilename(getSkillKey(runtimeAssets.skills[0]));
+    }
+  }, [runtimeAssets.skills, selectedSkillFilename]);
 
   function showToast(message: string) {
     setToastMessage(message);
@@ -418,6 +507,36 @@ export default function App() {
     shouldAutoScrollRef.current = distanceFromBottom <= 96;
   }
 
+  function hydrateSessionMessages(items: Array<{ role: string; content: string }>): ChatMessage[] {
+    const base = Date.now();
+    return items.map((item, index) => ({
+      id: uid(),
+      role: item.role === "user" ? "user" : "assistant",
+      thought: "",
+      content: item.content ?? "",
+      traces: [],
+      createdAt: base + index,
+    }));
+  }
+
+  function formatSessionTime(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return new Intl.DateTimeFormat("zh-CN", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  }
+
+  function applyPromptPreset(prompt: string) {
+    setQuery(prompt);
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+  }
+
   async function loadRuntimeAssets() {
     setAssetsLoading(true);
     try {
@@ -430,12 +549,180 @@ export default function App() {
         agents_md: data.agents_md ?? "",
         soul_md: data.soul_md ?? "",
         memory_md: data.memory_md ?? "",
-        skills: Array.isArray(data.skills) ? data.skills : [],
+        skills: Array.isArray(data.skills)
+          ? data.skills.map((skill) => ({
+              filename: skill.filename,
+              content: skill.content,
+              source: skill.source ?? "project",
+            }))
+          : [],
       });
+      if (!selectedSkillFilename && Array.isArray(data.skills) && data.skills.length > 0) {
+        const firstSkill = {
+          filename: data.skills[0].filename,
+          content: data.skills[0].content,
+          source: data.skills[0].source ?? "project",
+        };
+        setSelectedSkillFilename(getSkillKey(firstSkill));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "运行时资产加载失败");
     } finally {
       setAssetsLoading(false);
+    }
+  }
+
+  async function refreshSessions(nextUserId = userId) {
+    const normalized = nextUserId.trim();
+    if (!normalized) return;
+    const response = await fetch(`${apiBase}/sessions?user_id=${encodeURIComponent(normalized)}`);
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const data = (await response.json()) as { sessions: SessionSummary[] };
+    setSessions(Array.isArray(data.sessions) ? data.sessions : []);
+  }
+
+  async function confirmUserSessions() {
+    const normalized = userIdInput.trim();
+    if (!normalized || sessionsLoading) return;
+    setSessionsLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`${apiBase}/sessions/bootstrap`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: normalized }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const data = (await response.json()) as SessionBootstrapResponse;
+      setUserId(normalized);
+      setCurrentThreadId(data.current_thread_id);
+      setSessions(Array.isArray(data.sessions) ? data.sessions : []);
+      setMessages([]);
+      setActiveTraceMessageId(null);
+      shouldAutoScrollRef.current = true;
+      showToast("已加载历史会话，并创建了新的空会话。");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "历史会话加载失败");
+    } finally {
+      setSessionsLoading(false);
+    }
+  }
+
+  async function createNewSession() {
+    if (!userId.trim() || sessionsLoading) {
+      showToast("请先确认 USERID");
+      return;
+    }
+    setSessionsLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`${apiBase}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId.trim() }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const created = (await response.json()) as SessionSummary;
+      setCurrentThreadId(created.thread_id);
+      setMessages([]);
+      setActiveTraceMessageId(null);
+      await refreshSessions(userId.trim());
+      shouldAutoScrollRef.current = true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "新会话创建失败");
+    } finally {
+      setSessionsLoading(false);
+    }
+  }
+
+  async function openSession(threadId: string) {
+    if (!userId.trim() || sessionsLoading || !threadId) return;
+    setSessionsLoading(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `${apiBase}/sessions/${encodeURIComponent(threadId)}/messages?user_id=${encodeURIComponent(userId.trim())}`,
+      );
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const data = (await response.json()) as SessionMessagesResponse;
+      setCurrentThreadId(data.thread_id);
+      setMessages(hydrateSessionMessages(Array.isArray(data.messages) ? data.messages : []));
+      setActiveTraceMessageId(null);
+      shouldAutoScrollRef.current = true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "历史会话加载失败");
+    } finally {
+      setSessionsLoading(false);
+    }
+  }
+
+  async function deleteCurrentSession(threadId: string) {
+    if (!userId.trim() || sessionsLoading || !threadId) return;
+    setSessionsLoading(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `${apiBase}/sessions/${encodeURIComponent(threadId)}?user_id=${encodeURIComponent(userId.trim())}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const nextSessions = sessions.filter((session) => session.thread_id !== threadId);
+      setSessions(nextSessions);
+      if (currentThreadId === threadId) {
+        if (nextSessions[0]) {
+          await openSession(nextSessions[0].thread_id);
+        } else {
+          const created = await fetch(`${apiBase}/sessions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id: userId.trim() }),
+          });
+          if (!created.ok) {
+            throw new Error(await created.text());
+          }
+          const createdSession = (await created.json()) as SessionSummary;
+          setCurrentThreadId(createdSession.thread_id);
+          setMessages([]);
+          setActiveTraceMessageId(null);
+          await refreshSessions(userId.trim());
+        }
+      } else {
+        await refreshSessions(userId.trim());
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "删除会话失败");
+    } finally {
+      setSessionsLoading(false);
+    }
+  }
+
+  async function loadRuntimeMcpConfig() {
+    setMcpLoading(true);
+    try {
+      const response = await fetch(`${apiBase}/runtime/mcp/config`);
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const data = (await response.json()) as RuntimeMCPConfig;
+      setMcpConfig({
+        config_text: data.config_text ?? "",
+        servers: Array.isArray(data.servers) ? data.servers : [],
+        status: Array.isArray(data.status) ? data.status : [],
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "MCP 配置加载失败");
+    } finally {
+      setMcpLoading(false);
     }
   }
 
@@ -454,11 +741,64 @@ export default function App() {
         throw new Error(await response.text());
       }
       const data = (await response.json()) as RuntimeAssets;
-      setRuntimeAssets(data);
+      setRuntimeAssets({
+        agents_md: data.agents_md ?? "",
+        soul_md: data.soul_md ?? "",
+        memory_md: data.memory_md ?? "",
+        skills: Array.isArray(data.skills)
+          ? data.skills.map((skill) => ({
+              filename: skill.filename,
+              content: skill.content,
+              source: skill.source ?? "project",
+            }))
+          : [],
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "运行时资产保存失败");
     } finally {
       setAssetsSaving(false);
+    }
+  }
+
+  async function saveRuntimeMcpConfig() {
+    setMcpSaving(true);
+    setError("");
+    try {
+      const response = await fetch(`${apiBase}/runtime/mcp/config`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ config_text: mcpConfig.config_text }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const data = (await response.json()) as RuntimeMCPConfig;
+      setMcpConfig(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "MCP 配置保存失败");
+    } finally {
+      setMcpSaving(false);
+    }
+  }
+
+  async function reloadRuntimeMcpConfig() {
+    setMcpSaving(true);
+    setError("");
+    try {
+      const response = await fetch(`${apiBase}/runtime/mcp/reload`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const data = (await response.json()) as RuntimeMCPConfig;
+      setMcpConfig(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "MCP 重载失败");
+    } finally {
+      setMcpSaving(false);
     }
   }
 
@@ -471,12 +811,13 @@ export default function App() {
         Array.from(files).map(async (file) => ({
           filename: file.name,
           content: await file.text(),
+          source: "project",
         })),
       );
 
-      const mergedMap = new Map(runtimeAssets.skills.map((skill) => [skill.filename, skill]));
+      const mergedMap = new Map(runtimeAssets.skills.map((skill) => [getSkillKey(skill), skill]));
       for (const skill of uploaded) {
-        mergedMap.set(skill.filename, skill);
+        mergedMap.set(getSkillKey(skill), skill);
       }
       const nextAssets: RuntimeAssets = {
         ...runtimeAssets,
@@ -494,13 +835,69 @@ export default function App() {
         throw new Error(await response.text());
       }
       const data = (await response.json()) as RuntimeAssets;
-      setRuntimeAssets(data);
+      setRuntimeAssets({
+        agents_md: data.agents_md ?? "",
+        soul_md: data.soul_md ?? "",
+        memory_md: data.memory_md ?? "",
+        skills: Array.isArray(data.skills)
+          ? data.skills.map((skill) => ({
+              filename: skill.filename,
+              content: skill.content,
+              source: skill.source ?? "project",
+            }))
+          : [],
+      });
+      if (!selectedSkillFilename && data.skills.length > 0) {
+        const firstSkill = {
+          filename: data.skills[0].filename,
+          content: data.skills[0].content,
+          source: data.skills[0].source ?? "project",
+        };
+        setSelectedSkillFilename(getSkillKey(firstSkill));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "技能上传失败");
     } finally {
       setAssetsSaving(false);
     }
   }
+
+  function updateSkillContent(skillKey: string, content: string) {
+    setRuntimeAssets((prev) => ({
+      ...prev,
+      skills: prev.skills.map((skill) => (getSkillKey(skill) === skillKey ? { ...skill, content } : skill)),
+    }));
+  }
+
+  function addSkillDraft() {
+    const filename = `new-skill/SKILL.md`;
+    setRuntimeAssets((prev) => {
+      if (prev.skills.some((skill) => getSkillKey(skill) === `project:${filename}`)) return prev;
+      return {
+        ...prev,
+        skills: [
+          ...prev.skills,
+          {
+            filename,
+            content:
+              "---\nname: new-skill\ndescription: Describe when this skill should be used.\nuser-invocable: true\n---\n\n# New Skill\n\nWrite the skill instructions here.\n",
+            source: "project",
+          },
+        ].sort((a, b) => a.filename.localeCompare(b.filename)),
+      };
+    });
+    setSelectedSkillFilename(`project:${filename}`);
+  }
+
+  function deleteSelectedSkill() {
+    if (!selectedSkill) return;
+    setRuntimeAssets((prev) => ({
+      ...prev,
+      skills: prev.skills.filter((skill) => getSkillKey(skill) !== getSkillKey(selectedSkill)),
+    }));
+  }
+
+  const selectedSkill = runtimeAssets.skills.find((skill) => getSkillKey(skill) === selectedSkillFilename) ?? runtimeAssets.skills[0] ?? null;
 
   async function handleUpload(file: File) {
     setUploading(true);
@@ -530,7 +927,11 @@ export default function App() {
 
   async function handleSend() {
     if (!userId.trim()) {
-      showToast("请先在菜单里填写 User ID");
+      showToast("请先确认 USERID");
+      return;
+    }
+    if (!currentThreadId.trim()) {
+      showToast("请先创建或选择一个会话");
       return;
     }
     if (!query.trim() || isSending) return;
@@ -541,6 +942,7 @@ export default function App() {
     const userMessage: ChatMessage = {
       id: uid(),
       role: "user",
+      thought: "",
       content: query.trim(),
       traces: [],
       createdAt: Date.now(),
@@ -559,7 +961,7 @@ export default function App() {
         },
         body: JSON.stringify({
           query: userMessage.content,
-          thread_id: threadId,
+          thread_id: currentThreadId,
           user_id: userId.trim(),
           plan_mode: forcePlan ? "strict_plan" : "auto",
           model_choice: modelChoice,
@@ -574,19 +976,34 @@ export default function App() {
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
 
-      const pushBlock = (block: string) => {
-        const trimmed = block.trim();
+      const pushEvent = (rawLine: string) => {
+        const trimmed = rawLine.trim();
         if (!trimmed) return;
+        let payload: { type?: string; content?: string } = {};
+        try {
+          payload = JSON.parse(trimmed);
+        } catch {
+          return;
+        }
+        const type = payload.type || "answer";
+        const content = payload.content || "";
+        if (!content) return;
         setMessages((prev) =>
           prev.map((message) => {
             if (message.id !== assistantPlaceholder.id) return message;
-            if (isTraceBlock(trimmed)) {
-              if (message.traces[message.traces.length - 1] === trimmed) return message;
-              return { ...message, traces: [...message.traces, trimmed] };
+            if (type === "trace") {
+              if (message.traces[message.traces.length - 1] === content) return message;
+              return { ...message, traces: [...message.traces, content] };
+            }
+            if (type === "thought") {
+              return {
+                ...message,
+                thought: message.thought ? `${message.thought}${content}` : content,
+              };
             }
             return {
               ...message,
-              content: message.content ? `${message.content}\n\n${trimmed}` : trimmed,
+              content: message.content ? `${message.content}${content}` : content,
             };
           }),
         );
@@ -596,13 +1013,14 @@ export default function App() {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const blocks = buffer.split("\n\n");
-        buffer = blocks.pop() ?? "";
-        for (const block of blocks) pushBlock(block);
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) pushEvent(line);
       }
 
       const finalChunk = buffer.trim();
-      if (finalChunk) pushBlock(finalChunk);
+      if (finalChunk) pushEvent(finalChunk);
+      await refreshSessions(userId.trim());
     } catch (err) {
       const message = err instanceof Error ? err.message : "请求失败";
       setError(message);
@@ -628,7 +1046,7 @@ export default function App() {
         <div className="brand sidebar-brand">
           <div className="brand-badge">IA</div>
           <div>
-            <div className="brand-title">InsightAgentPro</div>
+            <div className="brand-title">InsightAgentMax</div>
             <div className="brand-subtitle">Agent Runtime Studio</div>
           </div>
           <button className="drawer-close" type="button" onClick={() => setShowSidebar(false)}>
@@ -637,21 +1055,69 @@ export default function App() {
         </div>
 
         <div className="sidebar-section">
-          <div className="sidebar-title">Workspace</div>
-          <label className="field compact">
-            <span>API Base</span>
-            <input value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
-          </label>
-          <label className="field compact">
-            <span>User ID</span>
-            <input
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              placeholder="请先在菜单里填写 User ID"
-              className={!userId.trim() ? "required" : ""}
-            />
-            <div className="field-note field-note-strong">填写 User ID 以启用长期记忆</div>
-          </label>
+          <div className="sidebar-title">Sessions</div>
+          <div className="asset-card session-identity-card">
+            <label className="field compact session-identity-field">
+              <div className="session-identity-label-row">
+                <span>UserID</span>
+                <button
+                  className="session-create-button session-create-button-inline"
+                  type="button"
+                  onClick={() => void createNewSession()}
+                  disabled={!userId.trim() || sessionsLoading}
+                >
+                  新会话
+                </button>
+              </div>
+              <div className="session-identity-note">输入 User ID 开启历史会话</div>
+              <input
+                value={userIdInput}
+                onChange={(e) => setUserIdInput(e.target.value)}
+                placeholder="输入 UserID 后点击确定"
+                className={!userId.trim() ? "required" : ""}
+              />
+            </label>
+            <button
+              className={`primary-button sidebar-save-button sidebar-save-button-compact session-confirm-button ${
+                isConfirmedUserId ? "confirmed" : ""
+              }`}
+              type="button"
+              onClick={() => void confirmUserSessions()}
+              disabled={!userIdInput.trim() || sessionsLoading}
+            >
+              {sessionsLoading ? "处理中..." : "确定"}
+            </button>
+            <div className="sidebar-title session-identity-header">History Sessions</div>
+            <div className="session-list">
+              {sessions.map((session) => (
+                <div
+                  key={session.thread_id}
+                  className={`session-item ${currentThreadId === session.thread_id ? "active" : ""}`}
+                >
+                  <button type="button" className="session-item-open" onClick={() => void openSession(session.thread_id)}>
+                    <div className="session-item-top">
+                      <strong>{session.title}</strong>
+                      <span>{formatSessionTime(session.updated_at)}</span>
+                    </div>
+                    <div className="session-item-preview">{session.last_message_preview || "空会话"}</div>
+                  </button>
+                  <div className="session-item-actions">
+                    <button
+                      type="button"
+                      className="session-delete-button"
+                      onClick={() => void deleteCurrentSession(session.thread_id)}
+                      disabled={sessionsLoading}
+                    >
+                      删除
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {!sessions.length ? (
+                <div className="skill-empty">{sessionsLoading ? "加载中..." : "确认 USERID 后显示历史会话"}</div>
+              ) : null}
+            </div>
+          </div>
         </div>
 
         <div className="sidebar-section">
@@ -701,26 +1167,145 @@ export default function App() {
         <div className="sidebar-section">
           <div className="sidebar-title">Skills</div>
           <div className="asset-card">
-            <div className="skill-chip-list">
-              {runtimeAssets.skills.map((skill) => (
-                <span key={skill.filename} className="skill-chip">
-                  {skill.filename}
-                </span>
-              ))}
-              {!runtimeAssets.skills.length ? <span className="skill-empty">暂无已加载 Skills</span> : null}
+            <div className="skill-section skill-section-top">
+              <div className="skill-chip-list skill-grid-list">
+                {runtimeAssets.skills.map((skill) => (
+                  <button
+                    key={getSkillKey(skill)}
+                    type="button"
+                    className={`skill-chip skill-chip-button ${selectedSkill && getSkillKey(selectedSkill) === getSkillKey(skill) ? "active" : ""}`}
+                    onClick={() => setSelectedSkillFilename(getSkillKey(skill))}
+                    title={skill.filename}
+                  >
+                    {getSkillDisplayName(skill.filename)}
+                  </button>
+                ))}
+                {!runtimeAssets.skills.length ? <span className="skill-empty">暂无已加载 Skills</span> : null}
+              </div>
             </div>
-            <label className="upload-box compact skill-upload-box sidebar-action-button">
-              <input
-                type="file"
-                accept=".md,text/markdown,text/plain"
-                multiple
-                onChange={(e) => {
-                  void handleSkillUpload(e.target.files);
-                  e.currentTarget.value = "";
-                }}
+            <div className="skill-section skill-section-middle">
+              {selectedSkill ? (
+                <label className="field compact">
+                  <span>{getSkillDisplayName(selectedSkill.filename)}</span>
+                  <textarea
+                    rows={12}
+                    className="runtime-asset-textarea skill-body-editor"
+                    value={selectedSkill.content}
+                    onChange={(e) => updateSkillContent(getSkillKey(selectedSkill), e.target.value)}
+                  />
+                </label>
+              ) : (
+                <div className="skill-empty">选择或上传一个 Skill package。</div>
+              )}
+            </div>
+            <div className="skill-section skill-section-bottom">
+              <div className="skill-toolbar skill-toolbar-bottom">
+                <button
+                  className="secondary-button sidebar-save-button-compact"
+                  type="button"
+                  onClick={addSkillDraft}
+                >
+                  新建 Skill
+                </button>
+                <button
+                  className="secondary-button sidebar-save-button-compact skill-delete-button"
+                  type="button"
+                  onClick={deleteSelectedSkill}
+                  disabled={!selectedSkill}
+                >
+                  删除 Skill
+                </button>
+                <label className="upload-box compact skill-upload-box sidebar-action-button">
+                  <input
+                    type="file"
+                    accept=".md,text/markdown,text/plain"
+                    multiple
+                    onChange={(e) => {
+                      void handleSkillUpload(e.target.files);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                  <span>{assetsSaving ? "上传中..." : "上传 SKILL.md"}</span>
+                </label>
+              </div>
+            </div>
+            <button
+              className="secondary-button sidebar-save-button sidebar-save-button-compact sidebar-action-button"
+              type="button"
+              onClick={() => void saveRuntimeAssets()}
+              disabled={assetsLoading || assetsSaving}
+            >
+              {assetsSaving ? "保存中..." : "保存 Skills"}
+            </button>
+          </div>
+        </div>
+
+        <div className="sidebar-section">
+          <div className="sidebar-title">MCP</div>
+          <div className="asset-card">
+            <div className="mcp-status-list">
+              {mcpConfig.status.map((item) => (
+                <div key={item.server_name} className="mcp-status-card">
+                  <div className="mcp-status-top">
+                    <strong>{item.server_name}</strong>
+                    <span className={item.connected ? "mcp-connected" : "mcp-disconnected"}>
+                      {item.connected ? "connected" : "disconnected"}
+                    </span>
+                  </div>
+                  <div className="mcp-status-meta">{item.transport}</div>
+                  <div className="mcp-tool-list">
+                    {item.tool_names.map((toolName) => (
+                      <span key={toolName} className="skill-chip">
+                        {toolName}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {!mcpConfig.status.length ? <span className="skill-empty">{mcpLoading ? "加载中..." : "暂无已连接 MCP server"}</span> : null}
+            </div>
+            <label className="field compact">
+              <span>.mcp.json</span>
+              <textarea
+                rows={12}
+                className="runtime-asset-textarea"
+                value={mcpConfig.config_text}
+                onChange={(e) => setMcpConfig((prev) => ({ ...prev, config_text: e.target.value }))}
+                placeholder={mcpLoading ? "加载中..." : "{\n  \"mcpServers\": {}\n}"}
               />
-              <span>{assetsSaving ? "上传中..." : "上传 Skills"}</span>
             </label>
+            <div className="mcp-toolbar">
+              <label className="upload-box compact skill-upload-box sidebar-action-button">
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const text = await file.text();
+                    setMcpConfig((prev) => ({ ...prev, config_text: text }));
+                    e.currentTarget.value = "";
+                  }}
+                />
+                <span>上传本地 .mcp.json 文件</span>
+              </label>
+              <button
+                className="secondary-button sidebar-save-button-compact"
+                type="button"
+                onClick={() => void reloadRuntimeMcpConfig()}
+                disabled={mcpSaving}
+              >
+                {mcpSaving ? "处理中..." : "Reload MCP"}
+              </button>
+            </div>
+            <button
+              className="secondary-button sidebar-save-button sidebar-save-button-compact sidebar-action-button"
+              type="button"
+              onClick={() => void saveRuntimeMcpConfig()}
+              disabled={mcpLoading || mcpSaving}
+            >
+              {mcpSaving ? "保存中..." : "保存 MCP 配置"}
+            </button>
           </div>
         </div>
 
@@ -766,7 +1351,7 @@ export default function App() {
           {messages.length === 0 ? (
             <div className="empty-state">
               <h2>开始一个新对话</h2>
-              <p>填写 User ID 后直接提问。</p>
+              <p>{userId ? "已进入该 USERID 的会话空间，直接提问或切换历史会话。" : "先输入 USERID 并点击确定，再开始聊天。"}</p>
             </div>
           ) : null}
 
@@ -778,11 +1363,8 @@ export default function App() {
             >
               {(() => {
                 const parsedPae = message.role === "assistant" ? parsePaeTrace(message.traces, message.content || "") : null;
-                const { thought, codeThought, answer } =
-                  message.role === "assistant"
-                    ? splitThinkingContent(message.content || "")
-                    : { thought: "", codeThought: "", answer: message.content || "" };
-                const fullThought = [thought, codeThought].filter(Boolean).join("\n\n");
+                const fullThought = message.role === "assistant" ? message.thought || "" : "";
+                const answer = message.content || "";
                 const showCollapsedThought = Boolean(fullThought && answer);
                 const thoughtExpanded = expandedThoughtIds.includes(message.id) || !showCollapsedThought;
                 const bodyContent = answer || (fullThought ? "" : message.content || "处理中...");
@@ -841,12 +1423,27 @@ export default function App() {
 
         <footer className="composer">
           <div className="composer-shell">
+            <div className="prompt-presets">
+              <span className="prompt-presets-label">体验示例</span>
+              <div className="prompt-preset-list">
+                {PROMPT_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    className="prompt-preset-chip"
+                    onClick={() => applyPromptPreset(preset.prompt)}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <textarea
               ref={textareaRef}
               rows={1}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={userId.trim() ? "Type a message..." : "请先在菜单里填写 User ID"}
+              placeholder={userId.trim() ? "Type a message..." : "请先输入 USERID 并点击确定"}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -858,9 +1455,12 @@ export default function App() {
               <label className="inline-select">
                   <span className="toolbar-label">模型</span>
                 <select value={modelChoice} onChange={(e) => setModelChoice(e.target.value)}>
-                  <option value="local_qwen">Qwen 3.5 9B</option>
+                  <option value="local_qwen">本地 Qwen 3.5 9B</option>
                   <option value="deepseek">DeepSeek Reasoner</option>
+                  <option value="deepseek_chat">DeepSeek Chat</option>
                   <option value="minimax">MiniMax M2.7</option>
+                  <option value="mimo">Xiaomi MiMo V2 Flash</option>
+                  <option value="mimo_pro">Xiaomi MiMo V2 Pro</option>
                 </select>
               </label>
               <button
@@ -931,6 +1531,44 @@ export default function App() {
                               <span>{activePaeTrace.currentStepId === step.stepId ? "running" : step.status}</span>
                             </div>
                             <div className="run-capability-chip">{step.capability}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
+
+                {activePaeTrace.activatedSkills.length || activePaeTrace.allowedTools.length ? (
+                  <section className="run-section">
+                    <div className="run-section-title">Skills</div>
+                    {activePaeTrace.activatedSkills.length ? (
+                      <div className="run-capability-list">
+                        {activePaeTrace.activatedSkills.map((skill) => (
+                          <span key={skill} className="run-capability-chip">
+                            {skill}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {activePaeTrace.allowedTools.length ? (
+                      <div className="run-submeta">
+                        允许工具：{activePaeTrace.allowedTools.join("、")}
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
+
+                {activePaeTrace.mcpToolCalls.length ? (
+                  <section className="run-section">
+                    <div className="run-section-title">MCP Tools</div>
+                    <div className="run-step-list">
+                      {activePaeTrace.mcpToolCalls.map((toolName, index) => (
+                        <div key={`${toolName}-${index}`} className="run-step-card">
+                          <div className="run-step-main">
+                            <div className="run-step-top">
+                              <strong>{toolName}</strong>
+                              <span>called</span>
+                            </div>
                           </div>
                         </div>
                       ))}

@@ -35,6 +35,9 @@ PLANNER_PROMPT = """你是一个复杂任务规划器。请根据用户目标，
 
 补充上下文（人格 / skill / 记忆 / 提示词）：
 {runtime_context}
+
+Skill Planner Hints：
+{planner_hints}
 """
 
 
@@ -129,6 +132,7 @@ async def planner_node(state: OrchestratorState) -> OrchestratorState:
         plan_mode=state.get("plan_mode", "auto"),
         metadata_filters=state.get("metadata_filters", {}),
         runtime_context=state.get("runtime_system_prompt", "无"),
+        planner_hints="\n".join(state.get("planner_hints", [])) or "无",
     )
 
     try:

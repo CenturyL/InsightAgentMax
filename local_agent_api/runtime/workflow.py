@@ -17,7 +17,12 @@ from local_agent_api.runtime.tool_registry import get_tool_names
 
 
 def _resolve_pae_model_choice(model_choice: str) -> str:
-    """PAE 内部强制使用云端模型，避免本地模型在 planner/synthesizer 上卡死。"""
+    """
+    PAE 内部强制使用更稳定的模型。
+
+    主循环允许用户手动选本地模型，但 PAE 的 planner/synthesizer 对结构化规划和长文本综合更敏感，
+    因此这里会把 local_qwen 提升到 deepseek，避免在复杂任务上卡死。
+    """
     choice = (model_choice or "deepseek").lower()
     if choice == "local_qwen":
         return "deepseek"
@@ -33,15 +38,29 @@ async def run_plan_and_execute_once(
     metadata_filters: dict[str, Any] | None = None,
     trace_sink: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """执行一次完整 PAE，并把 trace 和结果一起返回。"""
+    """
+    执行一次完整 PAE，并把 trace 和结果一起返回。
+
+    这条函数是“PAE tool 的同步版”：
+    - 主循环里的 run_plan_and_execute 工具最终会落到这里或其流式版本
+    - 进入 PAE 后不再重新判断是否要进入 PAE，而是直接执行 planner -> executor -> reflection -> synthesizer
+    """
     pae_model_choice = _resolve_pae_model_choice(model_choice)
-    runtime_context = build_runtime_context(
+    # PAE 也复用与主循环相同的 runtime context 组装逻辑，
+    # 所以 persona / skills / 长期记忆 / Markdown 记忆在这里同样生效。
+    runtime_context = await build_runtime_context(
         query=query,
         user_id=user_id,
         plan_mode=plan_mode,
         available_tool_names=get_tool_names(),
-        encourage_pae=True,
+        route_decision={
+            "pae_action": "run_plan_and_execute",
+            "pae_reason": "当前已进入 Plan-and-Execute 子流程。",
+            "selected_skills": [],
+        },
     )
+    # 注意这里的 state 是 PAE 子流程自己的运行状态，不是主循环的 AgentState。
+    # 两者分开，避免主循环和 PAE 内部状态相互污染。
     state: OrchestratorState = {
         "messages": [HumanMessage(content=query)],
         "user_id": user_id,
@@ -51,6 +70,10 @@ async def run_plan_and_execute_once(
         "metadata_filters": metadata_filters or {},
         "is_complex": True,
         "runtime_system_prompt": runtime_context.system_prompt,
+        "activated_skill_names": [item.package.metadata.name for item in runtime_context.activated_skills],
+        "planner_hints": runtime_context.skill_effects.planner_hints,
+        "executor_hints": runtime_context.skill_effects.executor_hints,
+        "output_format_hints": runtime_context.skill_effects.output_format_hints,
     }
 
     traces: list[str] = []
@@ -108,14 +131,24 @@ async def stream_plan_and_execute(
     metadata_filters: dict[str, Any] | None = None,
     trace_sink: Callable[[str], None] | None = None,
 ) -> AsyncGenerator[tuple[str, dict[str, Any] | None], None]:
-    """逐阶段流式执行 PAE。"""
+    """
+    逐阶段流式执行 PAE。
+
+    这是前端可观测性的主要来源：
+    planner / executor / reflection / synthesizer 的关键阶段都会转成 trace 行，
+    供聊天区和右侧运行面板实时展示。
+    """
     pae_model_choice = _resolve_pae_model_choice(model_choice)
-    runtime_context = build_runtime_context(
+    runtime_context = await build_runtime_context(
         query=query,
         user_id=user_id,
         plan_mode=plan_mode,
         available_tool_names=get_tool_names(),
-        encourage_pae=True,
+        route_decision={
+            "pae_action": "run_plan_and_execute",
+            "pae_reason": "当前已进入 Plan-and-Execute 子流程。",
+            "selected_skills": [],
+        },
     )
     state: OrchestratorState = {
         "messages": [HumanMessage(content=query)],
@@ -126,6 +159,10 @@ async def stream_plan_and_execute(
         "metadata_filters": metadata_filters or {},
         "is_complex": True,
         "runtime_system_prompt": runtime_context.system_prompt,
+        "activated_skill_names": [item.package.metadata.name for item in runtime_context.activated_skills],
+        "planner_hints": runtime_context.skill_effects.planner_hints,
+        "executor_hints": runtime_context.skill_effects.executor_hints,
+        "output_format_hints": runtime_context.skill_effects.output_format_hints,
     }
 
     def emit(line: str) -> str:

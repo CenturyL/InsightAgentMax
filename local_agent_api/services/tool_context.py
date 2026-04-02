@@ -1,6 +1,39 @@
 from __future__ import annotations
 
-"""基于 ContextVar 的请求级工具上下文，避免使用全局共享状态。"""
+"""
+基于 ContextVar 的请求级工具上下文隔离。
+
+为什么不用传参数？（对比两种做法）：
+  
+  方案 A（参数传递）：
+    def rag_search(query, user_id, thread_id, model_choice, metadata_filters):
+        ...
+    def web_search(query, user_id, thread_id, model_choice, metadata_filters):
+        ...
+    问题：每个工具签名都冗长，多用户隔离逻辑重复
+  
+  方案 B（ContextVar，当前采用）：
+    def rag_search(query):  # 签名很干净
+        user_id = get_tool_user_id()  # 从上下文隐式拿到
+        thread_id = get_tool_thread_id()
+        ...
+    def web_search(query):  # 签名一样干净
+        user_id = get_tool_user_id()  # 从上下文隐式拿到
+        ...
+    好处：工具签名不膨胀、多用户隔离天然实现、async 友好
+
+工作机制：
+  1. Service 层在流式输出开始前，调用 set_tool_request_context(...)
+  2. ContextVar 把所有请求信息（user_id/thread_id/model_choice/filters）存到线程本地储存
+  3. 工具函数可以随时调用 get_tool_user_id() 等，无需知道当前请求是哪个
+  4. 流式输出结束后，调用 reset_tool_request_context() 恢复上一个请求的上下文
+  5. 多个并发请求互不污染（async context vars 自动隔离）
+
+ContextVar 的好处（对比全局变量）：
+  ✓ 并发安全：每个 async task 有自己独立的值，不需要 Lock
+  ✓ 中间件友好：可以在调用链的任何地方访问，不需要显式传参
+  ✓ 生命周期管理：token 模式确保即使异常也能恢复
+"""
 
 import asyncio
 from contextvars import ContextVar
@@ -45,7 +78,14 @@ def set_tool_request_context(
     metadata_filters: dict[str, Any] | None,
     in_pae: bool = False,
 ) -> dict[str, Any]:
-    """一次性设置当前请求的工具上下文。"""
+    """
+    一次性设置当前请求的工具上下文。
+
+    这里顺手为每个请求创建一个独立的 asyncio.Queue 作为 tool trace 通道：
+    - 工具函数可随时 append trace
+    - service 层可并发监听这个 queue
+    - 多个请求之间因为 ContextVar 隔离，不会串线
+    """
     trace_queue: asyncio.Queue[str] = asyncio.Queue()
     return {
         "metadata": _metadata_filters_var.set(metadata_filters or None),
@@ -95,6 +135,8 @@ def is_in_pae() -> bool:
 
 
 def append_tool_trace(line: str) -> None:
+    # trace 一份存到内存列表里，便于结束后 drain；
+    # 一份立即 put 到 queue 里，便于 service 层做实时流式输出。
     traces = list(_tool_trace_var.get())
     traces.append(line)
     _tool_trace_var.set(traces)

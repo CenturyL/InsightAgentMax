@@ -46,3 +46,7 @@ class OrchestratorState(TypedDict):
     citations: NotRequired[list[dict[str, Any]]]
     final_answer: NotRequired[str]
     runtime_system_prompt: NotRequired[str]
+    activated_skill_names: NotRequired[list[str]]
+    planner_hints: NotRequired[list[str]]
+    executor_hints: NotRequired[list[str]]
+    output_format_hints: NotRequired[list[str]]

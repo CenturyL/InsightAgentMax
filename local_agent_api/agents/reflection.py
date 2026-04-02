@@ -7,7 +7,14 @@ from local_agent_api.services.tool_context import set_tool_request_context, rese
 
 
 def _needs_reflection(state: OrchestratorState) -> bool:
-    """只有至少一个步骤是 partial/failed 时才进入 reflection。"""
+    """
+    当前 reflection 是“规则驱动补救”，不是 LLM judge。
+
+    触发条件非常直接：
+    - 只要 step_results 里出现 partial / failed
+    - 就进入 reflection 尝试补救
+    它不会把“当前目标 + 当前结果”再发给大模型做一次总体判断。
+    """
     results = state.get("step_results", [])
     if not results:
         return False
@@ -15,7 +22,17 @@ def _needs_reflection(state: OrchestratorState) -> bool:
 
 
 async def reflection_node(state: OrchestratorState) -> OrchestratorState:
-    """扩大召回范围重试弱步骤，并同步更新 plan 与 step_results。"""
+    """
+    对第一轮执行中的弱步骤做补救。
+
+    当前实现的策略是：
+    1. 只处理 partial / failed 的步骤
+    2. 如果步骤是检索/搜索类能力（rag_search / web_search / long_term_memory）
+       就构造一个“扩大召回范围”的 retry query 再试一次
+    3. 如果是其他能力（例如 analysis），暂不做通用自动补救
+
+    也就是说，这里更像“工程化 retry policy”，而不是完整的 LLM reflection。
+    """
     if not _needs_reflection(state):
         return state
 
@@ -40,6 +57,8 @@ async def reflection_node(state: OrchestratorState) -> OrchestratorState:
                 continue
 
             capability = result.get("capability", "rag_search")
+            # 这里的补救策略不是让模型自由反思，而是明确告诉检索类工具：
+            # “请扩大召回范围，优先补充可直接回答该步骤的证据”
             retry_query = f"{result['goal']}\n请扩大召回范围，优先补充可直接回答该步骤的证据。"
             try:
                 if capability in {"rag_search", "rag_search_uploaded", "web_search", "search_long_term_memory"}:

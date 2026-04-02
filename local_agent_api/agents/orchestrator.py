@@ -25,6 +25,9 @@ SYNTHESIZER_PROMPT = """你是一个通用智能体中的综合分析器。请�
 输出格式要求：
 {format_instruction}
 
+Skill 输出提示：
+{skill_output_hints}
+
 执行计划：
 {plan_text}
 
@@ -70,6 +73,7 @@ def build_synthesizer_prompt(state: OrchestratorState) -> str:
         query=query,
         plan_mode=plan_mode,
         format_instruction=_format_instruction_for_mode(plan_mode),
+        skill_output_hints="\n".join(state.get("output_format_hints", [])) or "无",
         plan_text="\n".join(plan_lines) or "无",
         results_text="\n\n".join(result_lines) or "无",
         sources_text=format_citations(state.get("citations", [])) if state.get("citations") else "无",

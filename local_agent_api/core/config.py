@@ -27,9 +27,14 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str  # 无默认值，强制从环境变量/.env 文件读取
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     DEEPSEEK_MODEL: str = "deepseek-reasoner"
+    DEEPSEEK_CHAT_MODEL: str = "deepseek-chat"
     MINIMAX_API_KEY: Optional[str] = None
     MINIMAX_BASE_URL: str = "https://api.minimax.io/v1"
     MINIMAX_MODEL: str = "MiniMax-M2.5"
+    MIMO_API_KEY: Optional[str] = None
+    MIMO_BASE_URL: str = "https://api.xiaomimimo.com/v1"
+    MIMO_MODEL: str = "mimo-v2-flash"
+    MIMO_PRO_MODEL: str = "mimo-v2-pro"
     
     # RAG 向量数据库与模型配置
     VECTOR_STORE_PATH: str = str(_PROJECT_ROOT / "data" / "chroma_db")
@@ -45,6 +50,14 @@ class Settings(BaseSettings):
     REACT_MAX_TOOL_CALLS: int = 10
     REACT_MAX_NO_PROGRESS_CALLS: int = 3
     PAE_MAX_CALLS_PER_REQUEST: int = 1
+    CONTEXT_COMPRESSION_ENABLED: bool = True
+    CONTEXT_COMPRESSION_MAX_MESSAGES: int = 14
+    CONTEXT_COMPRESSION_MAX_CHARS: int = 12000
+    CONTEXT_COMPRESSION_RECENT_TURNS: int = 4
+    CONTEXT_COMPRESSION_MIN_DELTA_MESSAGES: int = 4
+    MCP_ENABLED: bool = True
+    MCP_CONFIG_PATH: Optional[str] = None
+    SKILL_COMPAT_MODE: str = "claude"
 
     # ── 长期记忆 & 持久化 Checkpointer（可选）────────────────────────────────
     # 格式：postgresql://用户名:密码@主机:端口/数据库名

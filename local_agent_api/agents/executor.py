@@ -20,6 +20,7 @@ async def _run_analysis_step(state: OrchestratorState, step_query: str, step_goa
         f"原始问题：{state['messages'][-1].content if state.get('messages') else ''}\n"
         f"当前子目标：{step_goal}\n"
         f"子任务查询：{step_query}\n"
+        f"执行提示：{'; '.join(state.get('executor_hints', [])) or '无'}\n"
         "请给出简洁、结构化的中间结论；若证据不足请明确说明。"
     )
     response = await model.ainvoke(prompt)

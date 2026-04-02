@@ -1,6 +1,9 @@
 import httpx
 import asyncio
 import sys
+import pytest
+
+pytestmark = pytest.mark.skip(reason="遗留手工流式联调脚本，依赖本地服务与旧版接口，不纳入自动化 pytest。")
 
 async def test_llm_stream():
     url = "http://127.0.0.1:8000/api/v1/chat/stream"

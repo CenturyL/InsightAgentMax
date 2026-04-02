@@ -27,7 +27,18 @@ def _resolve_device(preferred: str) -> str:
 
 def get_embedding_model() -> HuggingFaceEmbeddings:
     """
-    获取全局单一的本地 Embedding 模型实例
+    获取全局单一的本地 Embedding 模型实例。
+
+    这里返回的是“句向量 / 文档向量编码器”，不是只做 tokenizer 的工具。
+    调用方只需要传入一段完整文本（例如一个 child chunk 或一个 query），
+    模型内部会先执行自己的 tokenizer，把文本切成 token，再经过编码和 pooling
+    得到一个固定维度的单向量。
+
+    也就是说：
+    - 入库时：一个 chunk 文本 -> 模型内部 tokenizer -> 一个 chunk 向量
+    - 查询时：一个 query 文本 -> 模型内部 tokenizer -> 一个 query 向量
+
+    向量库最终存的是“每个 chunk 一个向量”，而不是“每个 token 一个向量”。
     """
     global _embedding_instance
     if _embedding_instance is None:

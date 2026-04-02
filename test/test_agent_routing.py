@@ -1,5 +1,8 @@
 import httpx
 import asyncio
+import pytest
+
+pytestmark = pytest.mark.skip(reason="遗留路由联调脚本，依赖旧版接口与手工服务，不纳入自动化 pytest。")
 
 async def test_modern_agent():
     url = "http://127.0.0.1:8000/api/v1/chat/agent"

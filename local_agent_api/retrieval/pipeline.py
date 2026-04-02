@@ -453,7 +453,21 @@ def _build_chunk_documents(
     file_hash: str,
     metadata_overrides: dict[str, Any] | None = None,
 ) -> tuple[list[Document], list[Document]]:
-    
+    """
+    先构建 parent block，再构建 child chunk。
+
+    检索粒度真正落到向量库里的不是整篇原文档，也不是 parent block，
+    而是这里生成的 child_docs。
+
+    后续 add_documents(child_docs) 时，Chroma 会对每个 child chunk 单独调用
+    embedding_function：
+        child chunk 文本 -> embedding 模型内部 tokenizer -> 单个 chunk 向量
+
+    因此“一个 chunk 会被切成很多 token”并不意味着会存很多检索单元；
+    对向量库来说，检索单元仍然是这个 chunk 本身，因为最终只会得到一个
+    固定维度向量与该 chunk 绑定。
+    """
+
     # 构建 parent 块（切上_extract构造的block）
     parent_docs: list[Document] = []
     for doc in raw_docs:
@@ -514,6 +528,9 @@ def process_and_store_document(file_path: str, metadata_overrides: dict[str, Any
         metadata_overrides=metadata_overrides,
     )
     # Embedding & Persisting
+    # 这里不会先在项目代码里手动 tokenizer。
+    # Chroma.add_documents(...) 会逐个读取 split/page_content，并调用
+    # embedding_function=get_embedding_model() 生成“每个 chunk 一个向量”后再落库。
     vector_store.add_documents(splits)
     _persist_parent_documents(parent_docs, file_hash)
     return len(splits)
@@ -556,6 +573,9 @@ def dense_search_knowledge(
     where = _to_chroma_where(metadata_filters)
     if where:
         search_kwargs["filter"] = where
+    # similarity_search(query) 时，query 也不是在项目层先手动切 token；
+    # Chroma 会调用同一个 embedding_function，把整条 query 文本编码成一个
+    # query 向量，再和库里的 chunk 向量做相似度检索。
     return vector_store.similarity_search(query, **search_kwargs)
 
 # 向量rerank
