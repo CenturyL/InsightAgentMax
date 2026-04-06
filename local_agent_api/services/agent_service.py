@@ -402,13 +402,23 @@ async def get_agent_stream(
                 if result is not None:
                     final_result = result
             if final_result:
-                final_answer = final_result.get("final_answer", "")
-                if final_answer:
-                    await append_session_message(thread_id, user_id, "assistant", final_answer)
-                yield {"type": "answer", "content": final_answer}
-            if user_id:
-                asyncio.ensure_future(_extract_and_save_memories(thread_id, user_id))
-            return
+                if final_result.get("status") == "planning_failed":
+                    planning_reason = str(final_result.get("planning_reason", "")).strip() or "PAE 未能生成可执行计划。"
+                    yield {"type": "trace", "content": f"⚠️ [PAE规划失败] {planning_reason}"}
+                    yield {"type": "trace", "content": "↩️ [返回主循环] 已停止 PAE，交由主循环决定是否澄清需求或缩小任务范围。"}
+                    inputs["runtime_route"] = {
+                        "pae_action": "direct_or_simple_tools",
+                        "pae_reason": f"上一轮 PAE 规划失败：{planning_reason}。优先向用户澄清或缩小任务范围，不要再次直接进入 PAE。",
+                        "selected_skills": runtime_route.selected_skills,
+                    }
+                else:
+                    final_answer = final_result.get("final_answer", "")
+                    if final_answer:
+                        await append_session_message(thread_id, user_id, "assistant", final_answer)
+                    yield {"type": "answer", "content": final_answer}
+                    if user_id:
+                        asyncio.ensure_future(_extract_and_save_memories(thread_id, user_id))
+                    return
 
         stream_had_content = False
         emitted_trace_lines: set[str] = set()
@@ -547,13 +557,17 @@ async def get_agent_stream(
                 elif kind == "on_tool_end":
                     tool_name = event["name"]
                     if tool_name == "run_plan_and_execute":
-                        # PAE 是一个高级工具。它执行完以后，当前实现选择直接收尾，
-                        # 不再回到主循环做第二轮复杂推理，避免重复规划和重复输出。
                         for line in drain_tool_trace():
                             if line not in emitted_trace_lines:
                                 emitted_trace_lines.add(line)
                                 yield {"type": "trace", "content": line}
                         final_result = consume_last_pae_result()
+                        if final_result and final_result.get("status") == "planning_failed":
+                            planning_reason = str(final_result.get("planning_reason", "")).strip() or "PAE 未能生成可执行计划。"
+                            yield {"type": "trace", "content": f"⚠️ [PAE规划失败] {planning_reason}"}
+                            yield {"type": "trace", "content": "↩️ [继续主循环] 已把规划失败结果返回给主循环，由模型自行决定是否澄清或缩小任务范围。"}
+                            pae_tool_invoked = False
+                            continue
                         yield {"type": "trace", "content": "✅ [PAE完成] Plan-and-Execute 子流程执行完成，已直接输出最终结果。"}
                         if final_result and final_result.get("final_answer"):
                             stream_had_content = True

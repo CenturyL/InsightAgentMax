@@ -52,36 +52,6 @@ class PlannerStepSchema(BaseModel):
 
 PLANNER_STEPS_ADAPTER = TypeAdapter(list[PlannerStepSchema])
 
-# 兜底，返回固定通用prompt
-def _fallback_plan(query: str) -> list[PlanStep]:
-    """当模型输出无法解析时，返回一份可执行的保底计划。"""
-    return [
-        {
-            "step_id": "step_1",
-            "goal": "定位与问题最相关的通用知识、文档证据或外部信息源",
-            "reason": "先确定证据基础，避免后续分析脱离事实依据",
-            "required_capability": "rag_search",
-            "expected_output": "相关证据片段、来源和可用上下文摘要",
-            "status": "pending",
-        },
-        {
-            "step_id": "step_2",
-            "goal": "抽取能够回答问题的关键字段或关键信息",
-            "reason": "将非结构化内容转成可分析的中间结果",
-            "required_capability": "analysis",
-            "expected_output": "按主题整理的关键事实",
-            "status": "pending",
-        },
-        {
-            "step_id": "step_3",
-            "goal": f"围绕用户问题完成综合分析：{query[:50]}",
-            "reason": "结合证据形成最终回答或方案",
-            "required_capability": "synthesis",
-            "expected_output": "结构化最终答案与结论",
-            "status": "pending",
-        },
-    ]
-
 # 从模型回复里提取并初步处理 JSON 块或数组
 def _extract_json_block(raw: str) -> str:
     """从可能带解释文字或代码块的模型回复中提取最像 JSON 的数组部分。"""
@@ -119,7 +89,35 @@ def _normalize_plan(raw: str, query: str) -> list[PlanStep]:
             }
         )
 
-    return normalized or _fallback_plan(query)
+    if not normalized:
+        raise ValueError(f"planner 返回空计划，query={query[:60]}")
+    return normalized
+
+
+def _build_repair_prompt(
+    *,
+    original_prompt: str,
+    previous_output: str,
+    error_text: str,
+) -> str:
+    return (
+        original_prompt
+        + "\n\n上一次输出没有通过结构校验，请修正后重试。"
+        + "\n只输出合法 JSON 数组，禁止解释。"
+        + f"\n结构错误：{error_text}"
+        + f"\n上一次输出：\n{previous_output}"
+    )
+
+
+def _planning_failed_reason(first_error: Exception, second_error: Exception | None = None) -> str:
+    base = f"Planner 未能生成合法执行计划：{type(first_error).__name__}: {first_error}"
+    if second_error is None:
+        return base
+    return (
+        base
+        + f"；修正重试后仍失败：{type(second_error).__name__}: {second_error}"
+        + "。当前任务需要补充信息或缩小范围后再规划。"
+    )
 
 # planner主函数，直接显式用advanced_model
 async def planner_node(state: OrchestratorState) -> OrchestratorState:
@@ -135,18 +133,43 @@ async def planner_node(state: OrchestratorState) -> OrchestratorState:
         planner_hints="\n".join(state.get("planner_hints", [])) or "无",
     )
 
+    model = get_model_by_choice(state.get("model_choice", "deepseek"))
     try:
-        # 拿回复&标准化
-        model = get_model_by_choice(state.get("model_choice", "deepseek"))
         response = await model.ainvoke(prompt)
         raw = response.content.strip()
         normalized = _normalize_plan(raw, query)
-    except Exception:
-        normalized = _fallback_plan(query)
-
-    return {
-        **state,
-        "plan": normalized,
-        "current_step": 0,
-        "step_results": [],
-    }
+        return {
+            **state,
+            "planning_failed": False,
+            "planning_reason": "",
+            "plan": normalized,
+            "current_step": 0,
+            "step_results": [],
+        }
+    except Exception as first_error:
+        try:
+            repair_prompt = _build_repair_prompt(
+                original_prompt=prompt,
+                previous_output=locals().get("raw", ""),
+                error_text=str(first_error),
+            )
+            retry_response = await model.ainvoke(repair_prompt)
+            retry_raw = retry_response.content.strip()
+            normalized = _normalize_plan(retry_raw, query)
+            return {
+                **state,
+                "planning_failed": False,
+                "planning_reason": "",
+                "plan": normalized,
+                "current_step": 0,
+                "step_results": [],
+            }
+        except Exception as second_error:
+            return {
+                **state,
+                "planning_failed": True,
+                "planning_reason": _planning_failed_reason(first_error, second_error),
+                "plan": [],
+                "current_step": 0,
+                "step_results": [],
+            }

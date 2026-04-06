@@ -39,6 +39,7 @@ class OrchestratorState(TypedDict):
     metadata_filters: NotRequired[dict[str, Any]]
     is_complex: bool
     planning_reason: NotRequired[str]
+    planning_failed: NotRequired[bool]
     plan: NotRequired[list[PlanStep]]
     current_step: NotRequired[int]
     step_results: NotRequired[list[StepResult]]

@@ -87,6 +87,26 @@ async def run_plan_and_execute_once(
     if pae_model_choice != model_choice:
         emit(f"☁️ [PAE模型] 已将 PAE 内部模型切换为 {pae_model_choice}。")
     state = await planner_node(state)
+    if state.get("planning_failed"):
+        planning_reason = state.get("planning_reason", "Planner 未返回可执行计划。")
+        final_answer = (
+            "当前任务暂时无法稳定规划。"
+            f"\n规划失败原因：{planning_reason}"
+            "\n请先补充关键信息、缩小任务范围，或改成更明确的单一目标后再继续。"
+        )
+        emit(f"⚠️ [规划失败] {planning_reason}")
+        emit("↩️ [返回主循环] 当前不执行假计划，交由主循环决定是否澄清或改用直接回答。")
+        state["final_answer"] = final_answer
+        return {
+            "mode": "plan_and_execute",
+            "status": "planning_failed",
+            "planning_reason": planning_reason,
+            "plan": [],
+            "step_results": [],
+            "citations": [],
+            "trace": traces,
+            "final_answer": final_answer,
+        }
     plan = state.get("plan", [])
     if plan:
         emit("📝 [任务规划] 已生成执行计划：")
@@ -175,6 +195,26 @@ async def stream_plan_and_execute(
         yield emit(f"☁️ [PAE模型] 已将 PAE 内部模型切换为 {pae_model_choice}。"), None
 
     state = await planner_node(state)
+    if state.get("planning_failed"):
+        planning_reason = state.get("planning_reason", "Planner 未返回可执行计划。")
+        final_answer = (
+            "当前任务暂时无法稳定规划。"
+            f"\n规划失败原因：{planning_reason}"
+            "\n请先补充关键信息、缩小任务范围，或改成更明确的单一目标后再继续。"
+        )
+        yield emit(f"⚠️ [规划失败] {planning_reason}"), None
+        yield emit("↩️ [返回主循环] 当前不执行假计划，交由主循环决定是否澄清或改用直接回答。"), None
+        state["final_answer"] = final_answer
+        yield "", {
+            "mode": "plan_and_execute",
+            "status": "planning_failed",
+            "planning_reason": planning_reason,
+            "plan": [],
+            "step_results": [],
+            "citations": [],
+            "final_answer": final_answer,
+        }
+        return
     plan = state.get("plan", [])
     if plan:
         yield emit("📝 [任务规划] 已生成执行计划："), None
