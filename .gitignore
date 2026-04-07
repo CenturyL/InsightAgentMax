@@ -7,6 +7,8 @@ __pycache__/
 .env.*
 local_agent_api/.env
 local_agent_api/.env.*
+!.env.example
+!local_agent_api/.env.example
 
 # Python caches and test artifacts
 .pytest_cache/
@@ -33,3 +35,4 @@ local_agent_frontend/tsconfig.tsbuildinfo
 # OS / editor noise
 *.swp
 *.swo
+.vscode/
