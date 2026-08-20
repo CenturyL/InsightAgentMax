@@ -1,0 +1,17 @@
+ARG POSTGRES_IMAGE=localhost/postgres:16-alpine
+
+FROM ${POSTGRES_IMAGE} AS builder
+ENV HTTP_PROXY= HTTPS_PROXY= ALL_PROXY=
+RUN apk add --no-cache build-base postgresql16-dev clang19 llvm19-dev wget ca-certificates
+WORKDIR /src
+ARG PGVECTOR_VERSION=0.8.1
+RUN wget -q "https://codeload.github.com/pgvector/pgvector/tar.gz/refs/tags/v${PGVECTOR_VERSION}" -O pgvector.tar.gz \
+    && tar -xzf pgvector.tar.gz \
+    && cd "pgvector-${PGVECTOR_VERSION}" \
+    && make PG_CONFIG=/usr/local/bin/pg_config
+
+FROM ${POSTGRES_IMAGE}
+ARG PGVECTOR_VERSION=0.8.1
+COPY --from=builder "/src/pgvector-${PGVECTOR_VERSION}/vector.so" /usr/local/lib/postgresql/vector.so
+COPY --from=builder "/src/pgvector-${PGVECTOR_VERSION}/vector.control" /usr/local/share/postgresql/extension/vector.control
+COPY --from=builder "/src/pgvector-${PGVECTOR_VERSION}/sql/" /usr/local/share/postgresql/extension/

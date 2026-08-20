@@ -1,0 +1,91 @@
+# === OS / Editor ===
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# === Environment & Secrets ===
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.jks
+*.kdb
+*.mobileprovision
+
+# === Public showcase exclusions ===
+.claude/
+backend/.claude/
+backend/.mcp.json
+backend/data/
+archive_CLAUDE.md
+enhance.md
+enhance2.md
+unidatabase.md
+旧文档/
+tmp/
+output/
+
+# === Per-user insight files (only track default template) ===
+backend/insights/*.md
+!backend/insights/_default.md
+
+# === Local data artifacts ===
+backend/data/temp/
+backend/scripts/backend/
+
+# === Eval datasets (only track .example files) ===
+backend/data/eval/*.jsonl
+!backend/data/eval/*.example.jsonl
+
+# === Frontend ===
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/tsconfig.tsbuildinfo
+
+# === Logs & DB files ===
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# === Generated test reports ===
+testdata/knowledge_e2e_v1/LAST_RUN_REPORT.json
+testdata/knowledge_e2e_v1/LAST_RUN_REPORT.md
+
+# === Private / non-project ===
+学习文档/
+test1.py
+
+# === Claude Code config (not project runtime assets) ===
+# .claude/settings.local.json is Claude Code's own config, don't track
+.claude/settings.local.json
